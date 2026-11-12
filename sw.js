@@ -1,6 +1,6 @@
 'use strict';
-const CACHE = 'yoin-shell-v3';
-const SHELL = ['./', './index.html', './app.js', './films-api.js', './explore.js', './explore.css', './tmdb-logo.svg', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'yoin-shell-v4';
+const SHELL = ['./', './index.html', './app.js?v=4', './films-api.js?v=4', './explore.js?v=4', './explore.css?v=4', './tmdb-logo.svg', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
