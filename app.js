@@ -10,10 +10,11 @@ function validateRecords(rows) {
   if (!Array.isArray(rows)) throw new Error('invalid records');
   const ids = new Set();
   for (const r of rows) {
-    if (!r || typeof r.id !== 'string' || !r.id || ids.has(r.id) || typeof r.title !== 'string' || !r.title.trim() || !['watched', 'want'].includes(r.status) || !Number.isInteger(r.rating) || r.rating < 0 || r.rating > 5 || !Number.isFinite(r.updated) || ['date', 'meta', 'review'].some(k => typeof r[k] !== 'string')) throw new Error('invalid record');
+    if (!r || typeof r.id !== 'string' || !r.id || ids.has(r.id) || typeof r.title !== 'string' || !r.title.trim() || !['watched', 'want'].includes(r.status) || (!Number.isFinite(r.rating) || !Number.isInteger(r.rating * 2)) || r.rating < 0 || r.rating > 5 || !Number.isFinite(r.updated) || ['date', 'meta', 'review'].some(k => typeof r[k] !== 'string')) throw new Error('invalid record');
     if (r.movie != null) {
       const m = r.movie;
       if (m.source !== 'TMDB' || !Number.isInteger(m.id) || m.id < 1 || ['title', 'originalTitle', 'releaseDate', 'japanTheatricalDate', 'overview', 'poster'].some(k => typeof m[k] !== 'string') || !Number.isFinite(m.checkedAt) || !Array.isArray(m.directors) || !Array.isArray(m.genres) || [...m.directors, ...m.genres].some(x => typeof x !== 'string')) throw new Error('invalid movie');
+      if (m.cast != null && (!Array.isArray(m.cast) || m.cast.some(p => !p || typeof p.name !== 'string' || typeof p.character !== 'string'))) throw new Error('invalid cast');
       if (m.providers != null) {
         const p = m.providers;
         if (p.region !== 'JP' || !Number.isFinite(p.checkedAt) || typeof p.link !== 'string' || ['flatrate', 'rent', 'buy', 'free', 'ads'].some(k => !Array.isArray(p[k]) || p[k].some(x => typeof x !== 'string'))) throw new Error('invalid providers');
@@ -65,16 +66,17 @@ function providerHTML(movie) {
 }
 function movieHTML(movie) {
   if (!movie) return '';
-  return `<section class="movie-info"><p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/movie/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
+  return `<section class="movie-info"><p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${escape(person.name)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/movie/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
 }
 function render() {
+  if (typeof onLibraryChanged === 'function') onLibraryChanged();
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
   $('stats').innerHTML = `<span><b>${watched.length}</b>鑑賞済み</span><span><b>${records.length - watched.length}</b>観たい</span><span><b>${rated.length ? (rated.reduce((sum, r) => sum + r.rating, 0) / rated.length).toFixed(1) : '—'}</b>平均評価</span>`;
   const list = records.filter(r => (filter === 'all' || r.status === filter) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
   $('grid').innerHTML = list.length ? list.map(r => {
     const poster = safePoster(r.movie?.poster);
-    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${movieHTML(r.movie)}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '映画情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
+    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${movieHTML(r.movie)}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '映画情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
   }).join('') : `<div class="empty"><span class="eyebrow">YOUR FILM COLLECTION</span><h3>${records.length ? '該当する映画がありません' : '最初の一本を、記録しよう。'}</h3><p>${records.length ? '検索や絞り込みを変更してみてください。' : '好きな映画、観たい映画。<br>作品を検索して、あなたの映画の記録を始めましょう。'}</p></div>`;
 }
 function openRecord(record) {
@@ -132,7 +134,7 @@ $('lookup-results').onclick = async event => {
 $('connect').onclick = showConnection;
 $('connection-cancel').onclick = () => $('connection').close();
 $('disconnect').onclick = () => {
-  try { localStorage.removeItem(credentialKey); credential = ''; $('connect').textContent = '映画情報を接続'; $('connection').close(); }
+  try { localStorage.removeItem(credentialKey); credential = ''; $('connect').textContent = '映画情報を接続'; $('connection').close(); if (typeof onFilmConnectionChange === 'function') onFilmConnectionChange(); }
   catch (error) { $('connection-status').textContent = '接続設定を削除できませんでした。ブラウザの保存設定を確認してください。'; }
 };
 $('connection-form').onsubmit = async event => {
@@ -150,6 +152,7 @@ $('connection-form').onsubmit = async event => {
     $('connect').textContent = '映画情報：接続済み';
     $('connection').close();
     if ($('modal').open) searchMovies();
+    if (typeof onFilmConnectionChange === 'function') onFilmConnectionChange();
   } catch (error) { $('connection-status').textContent = error.message; }
   finally { $('connection-save').disabled = false; }
 };

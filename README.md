@@ -26,3 +26,7 @@ GitHub Pagesでmainブランチのルートを公開。配布物はindex.html、
 
 公式仕様: https://developer.themoviedb.org/reference/movie-watch-providers
 無料利用と帰属表示: https://developer.themoviedb.org/docs/faq
+
+## 映画を探す
+
+「映画を探す」でTMDBで人気の作品、日本の上映中作品、作品名検索、日本の配信サービスと視聴方法による絞り込みができます。作品名検索と配信条件は同時に適用せず、検索時に条件をクリアして明示します。ポスターから詳細を開き、出演者や配信先を確認して「観たい」に追加、または鑑賞記録を作成できます。TMDB IDで重複を防止し、既存作品は自分の記録を開きます。評価は0.5刻みです。接続前は登録案内を表示し、ダミーの映画情報は表示しません。

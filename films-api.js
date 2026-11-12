@@ -27,12 +27,30 @@ const FilmAPI = (() => {
       throw error;
     } finally { clearTimeout(timeout); }
   }
-  async function search(query, credential) {
-    const data = await request('search/movie', credential, { query, region: 'JP', include_adult: 'false' });
-    return (data.results || []).slice(0, 12).map(movie => ({
+  function summaries(data) {
+    return (data.results || []).map(movie => ({
       id: movie.id, title: text(movie.title), originalTitle: text(movie.original_title),
       releaseDate: date(movie.release_date), poster: image(movie.poster_path), overview: text(movie.overview)
     })).filter(movie => Number.isInteger(movie.id) && movie.id > 0);
+  }
+  async function search(query, credential) {
+    return summaries(await request('search/movie', credential, { query, region: 'JP', include_adult: 'false' }));
+  }
+  async function browse(options, credential) {
+    const page = Math.min(500, Math.max(1, Number(options.page) || 1));
+    let data;
+    if (options.query) data = await request('search/movie', credential, { query: options.query, region: 'JP', include_adult: 'false', page });
+    else if (options.mode === 'now' && !options.provider) data = await request('movie/now_playing', credential, { region: 'JP', page });
+    else {
+      const params = { include_adult: 'false', include_video: 'false', sort_by: 'popularity.desc', page };
+      if (options.provider) Object.assign(params, { watch_region: 'JP', with_watch_providers: options.provider, with_watch_monetization_types: options.monetization || 'flatrate' });
+      data = await request('discover/movie', credential, params);
+    }
+    return { movies: summaries(data), page: data.page || page, totalPages: Math.min(data.total_pages || 0, 500) };
+  }
+  async function providers(credential) {
+    const data = await request('watch/providers/movie', credential, { watch_region: 'JP' });
+    return (data.results || []).filter(p => Number.isInteger(p.provider_id) && typeof p.provider_name === 'string').sort((a, b) => (a.display_priorities?.JP ?? a.display_priority ?? 999) - (b.display_priorities?.JP ?? b.display_priority ?? 999)).map(p => ({ id: p.provider_id, name: p.provider_name }));
   }
   function normalizeProviders(data, checkedAt) {
     const jp = data.results?.JP;
@@ -58,11 +76,12 @@ const FilmAPI = (() => {
       releaseDate: date(data.release_date), japanTheatricalDate: theatricalDates[0] || '',
       runtime: Number.isFinite(data.runtime) && data.runtime > 0 ? data.runtime : null,
       directors: (data.credits?.crew || []).filter(p => p.job === 'Director').map(p => text(p.name)).filter(Boolean),
+      cast: (data.credits?.cast || []).slice(0, 12).map(p => ({ name: text(p.name), character: text(p.character) })),
       genres: (data.genres || []).map(g => text(g.name)).filter(Boolean),
       overview: text(data.overview), poster: image(data.poster_path), checkedAt: now,
       providers: providers.status === 'fulfilled' ? normalizeProviders(providers.value, now) : previous?.providers || null,
       providerError: providers.status === 'rejected'
     };
   }
-  return { request, search, details, normalizeProviders };
+  return { request, search, browse, providers, details, normalizeProviders };
 })();
