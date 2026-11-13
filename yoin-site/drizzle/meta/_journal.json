@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794494000000,
+      "tag": "0000_films",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794560000000,
+      "tag": "0001_shared_tmdb",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794569700000,
+      "tag": "0002_enrichment_snapshots",
+      "breakpoints": true
+    }
+  ]
+}

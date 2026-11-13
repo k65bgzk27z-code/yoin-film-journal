@@ -1,0 +1,1 @@
+CREATE TABLE app_settings (name TEXT PRIMARY KEY, body TEXT NOT NULL);
