@@ -67,7 +67,7 @@ function render() {
   $('grid').innerHTML = list.length ? list.map(r => {
     const poster = safePoster(r.movie?.poster);
     return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>映画情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '映画情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
-  }).join('') : `<div class="empty"><span class="eyebrow">YOUR FILM COLLECTION</span><h3>${records.length ? '該当する映画がありません' : '最初の一本を、記録しよう。'}</h3><p>${records.length ? '検索や絞り込みを変更してみてください。' : '好きな映画、観たい映画。<br>作品を検索して、あなたの映画の記録を始めましょう。'}</p></div>`;
+  }).join('') : `<div class="empty"><span class="eyebrow">YOUR FILM COLLECTION</span><h3>${records.length ? '該当する映画がありません' : '最初の一本を、記録しよう。'}</h3><p>${records.length ? '検索や絞り込みを変更してみてください。' : '好きな映画、観たい映画。<br>作品を検索して、あなたの映画の記録を始めましょう。'}</p>${records.length ? '<button data-clear-filters="1">検索・絞り込みをクリア</button>' : ''}</div>`;
 }
 function openRecord(record) {
   if(!storageHealthy)return;
@@ -170,7 +170,16 @@ $('search').oninput = render;
 $('sort').onchange = render;
 $('grid').onclick = async event => {
   const button = event.target.closest('button');
-  if (!button||!storageHealthy) return;
+  if (!button) return;
+  if (button.dataset.clearFilters) {
+    $('search').value = '';
+    if (filter === 'review') $('review-filter').textContent = '作品の確認が必要な記録';
+    filter = 'all';
+    document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+    render();
+    return;
+  }
+  if (!storageHealthy) return;
   if (button.dataset.edit) openRecord(records.find(r => r.id === button.dataset.edit));
   if (button.dataset.delete && confirm('この映画の記録を削除しますか？')) await persist(records.filter(r => r.id !== button.dataset.delete));
   if (button.dataset.info) {
