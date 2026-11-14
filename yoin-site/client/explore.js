@@ -17,7 +17,7 @@ function catalogHTML() {
   return catalog.map(film => {
     const record = findFilmRecord(film);
     const poster = safePoster(film.poster);
-    return `<button class="catalog-film" data-catalog-id="${film.id}" aria-label="${escape(film.title)}の詳細">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="catalog-placeholder" aria-hidden="true">${escape(Array.from(film.title).slice(0, 2).join(''))}</span>`}<span class="catalog-caption"><strong>${escape(film.title)}</strong><small>${escape(film.releaseDate.slice(0, 4) || '公開年不明')}</small>${record ? `<small class="badge">${record.status === 'want' ? '✓ 観たいに登録済み' : '✓ 鑑賞済み'}${record.rating ? ` · ★ ${record.rating.toFixed(1)}` : ''}</small>` : ''}</span></button>`;
+    return `<button class="catalog-film" data-catalog-id="${film.id}" aria-label="${escape(film.title)}の詳細">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="catalog-placeholder" aria-hidden="true">${escape(Array.from(film.title).slice(0, 2).join(''))}</span>`}<span class="catalog-caption"><strong>${escape(film.title)}</strong><small>${escape(film.releaseDate ? `公開日 ${film.releaseDate.replaceAll('-', '/')}` : '公開日不明')}</small>${record ? `<small class="badge">${record.status === 'want' ? '✓ 観たいに登録済み' : '✓ 鑑賞済み'}${record.rating ? ` · ★ ${record.rating.toFixed(1)}` : ''}</small>` : ''}</span></button>`;
   }).join('');
 }
 function onLibraryChanged() {
@@ -45,6 +45,23 @@ async function loadProviders() {
     $('explore-status').textContent += ' 配信サービスの一覧を取得できませんでした。再度このタブを開くと再試行します。';
   }
 }
+async function browseCatalog(options) {
+  if (options.query || options.provider || !['week', 'trending'].includes(options.mode)) {
+    return FilmAPI.browse(options, credential);
+  }
+  const page = Math.min(500, Math.max(1, Number(options.page) || 1));
+  const path = options.mode === 'week' ? 'catalog/week' : 'trending/movie/week';
+  const data = await FilmAPI.request(path, credential, { page });
+  const movies = (data.results || []).filter(movie => Number.isInteger(movie.id) && movie.id > 0).map(movie => ({
+    id: movie.id,
+    title: typeof movie.title === 'string' ? movie.title : '',
+    originalTitle: typeof movie.original_title === 'string' ? movie.original_title : '',
+    releaseDate: /^\d{4}-\d{2}-\d{2}/.test(movie.release_date || '') ? movie.release_date.slice(0, 10) : '',
+    poster: /^\/[a-zA-Z0-9_.-]+$/.test(movie.poster_path || '') ? `https://image.tmdb.org/t/p/w500${movie.poster_path}` : '',
+    overview: typeof movie.overview === 'string' ? movie.overview : ''
+  }));
+  return { movies, page: data.page || page, totalPages: Math.min(data.total_pages || 0, 500) };
+}
 async function loadCatalog(page = 1) {
   $('explore-connect').textContent = credential ? '接続設定' : '無料接続を設定';
   if (!credential) { disconnectedCatalog(); return; }
@@ -57,13 +74,13 @@ async function loadCatalog(page = 1) {
   catalog = [];
   $('explore-grid').innerHTML = '';
   try {
-    const result = await FilmAPI.browse({ query: catalogQuery, mode: $('explore-mode').value, provider: $('explore-provider').value, monetization: $('explore-monetization').value, page }, credential);
+    const result = await browseCatalog({ query: catalogQuery, mode: $('explore-mode').value, provider: $('explore-provider').value, monetization: $('explore-monetization').value, page });
     if (version !== catalogVersion) return;
     catalog = result.movies;
     catalogPage = result.page;
     catalogTotalPages = result.totalPages;
     $('explore-grid').innerHTML = catalog.length ? catalogHTML() : '<div class="catalog-empty"><h3>該当する映画がありません</h3><p>作品名や配信サービスの条件を変えてみてください。</p></div>';
-    const context = catalogQuery ? `「${catalogQuery}」の検索結果（配信条件は適用していません）` : $('explore-provider').value ? '日本の配信作品（視聴前に作品詳細で最新条件をご確認ください）' : $('explore-mode').value === 'now' ? '日本の上映中作品（TMDB登録情報）' : 'TMDBで人気の作品（世界の人気順）';
+    const context = catalogQuery ? `「${catalogQuery}」の検索結果（配信条件は適用していません）` : $('explore-provider').value ? '日本の配信作品（視聴前に作品詳細で最新条件をご確認ください）' : ({now:'日本の上映中作品（TMDB登録情報）',week:'日本の今週公開作品（月曜〜日曜・日本時間／TMDB登録情報）',trending:'TMDBの週間トレンド作品（世界）',popular:'TMDBで人気の作品（世界の人気順）'}[$('explore-mode').value]);
     $('explore-status').textContent = `${context} · ${catalogPage}ページ`;
     $('explore-prev').hidden = catalogPage <= 1;
     $('explore-next').hidden = catalogPage >= catalogTotalPages;
