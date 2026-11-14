@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const key = 'yoin-films-v1', credentialKey = 'yoin-tmdb-key';
 let ready=false,oldLocal=[];
+let randomFilmId = null, randomPickRequested = false;
 let records = [], filter = 'all', storageHealthy = false, credential = '', draftMovie = null, lookupVersion = 0;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safePoster = value => /^https:\/\/image\.tmdb\.org\/t\/p\/w500\/[\w.-]+$/.test(value || '') ? value : '';
@@ -58,16 +59,42 @@ function movieHTML(movie) {
   if (!movie) return '';
   return `<section class="movie-info"><p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${escape(person.name)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/movie/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
 }
+const randomButton = document.createElement('button');
+randomButton.id = 'random-pick';
+randomButton.type = 'button';
+randomButton.textContent = 'おまかせで1本';
+$('sort').after(randomButton);
+const randomResult = document.createElement('div');
+randomResult.id = 'random-pick-result';
+randomResult.setAttribute('role', 'status');
+randomResult.setAttribute('aria-live', 'polite');
+$('grid').before(randomResult);
+randomButton.onclick = () => {
+  const list = filteredRecords();
+  const alternatives = list.filter(r => r.id !== randomFilmId);
+  const candidates = alternatives.length ? alternatives : list;
+  randomFilmId = candidates.length ? candidates[Math.floor(Math.random() * candidates.length)].id : null;
+  randomPickRequested = true;
+  render();
+};
+function filteredRecords() {
+  return records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
+}
 function render() {
   if (typeof onLibraryChanged === 'function') onLibraryChanged();
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
   $('stats').innerHTML = `<span><b>${watched.length}</b>鑑賞済み</span><span><b>${records.length - watched.length}</b>観たい</span><span><b>${rated.length ? (rated.reduce((sum, r) => sum + r.rating, 0) / rated.length).toFixed(1) : '—'}</b>平均評価</span>`;
-  const list = records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
+  const list = filteredRecords();
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
-  $('grid').innerHTML = list.length ? list.map(r => {
+  const cardHTML = r => {
     const poster = safePoster(r.movie?.poster);
     return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>映画情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '映画情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
-  }).join('') : `<div class="empty"><span class="eyebrow">YOUR FILM COLLECTION</span><h3>${records.length ? '該当する映画がありません' : '最初の一本を、記録しよう。'}</h3><p>${records.length ? '検索や絞り込みを変更してみてください。' : '好きな映画、観たい映画。<br>作品を検索して、あなたの映画の記録を始めましょう。'}</p>${records.length ? '<button data-clear-filters="1">検索・絞り込みをクリア</button>' : ''}</div>`;
+  };
+  const selected = list.find(r => r.id === randomFilmId);
+  if (!selected) randomFilmId = null;
+  const featured = randomPickRequested ? `<section class="random-pick" aria-label="おまかせの1本"><p class="random-pick-label">おまかせで1本</p>${selected ? cardHTML(selected) : `<p>${list.length ? 'もう一度押して、今の条件から選んでみましょう。' : '対象の映画がありません。'}</p>`}${selected && list.length === 1 ? '<p>今の条件では、この1本だけです。</p>' : ''}</section>` : '';
+  $('random-pick-result').innerHTML = featured;
+  $('grid').innerHTML = list.length ? list.map(cardHTML).join('') : `<div class="empty"><span class="eyebrow">YOUR FILM COLLECTION</span><h3>${records.length ? '該当する映画がありません' : '最初の一本を、記録しよう。'}</h3><p>${records.length ? '検索や絞り込みを変更してみてください。' : '好きな映画、観たい映画。<br>作品を検索して、あなたの映画の記録を始めましょう。'}</p>${records.length ? '<button data-clear-filters="1">検索・絞り込みをクリア</button>' : ''}</div>`;
 }
 function openRecord(record) {
   if(!storageHealthy)return;
@@ -168,6 +195,7 @@ document.querySelectorAll('[data-filter]').forEach(button => button.onclick = ()
 });
 $('search').oninput = render;
 $('sort').onchange = render;
+$('random-pick-result').onclick = event => $('grid').onclick(event);
 $('grid').onclick = async event => {
   const button = event.target.closest('button');
   if (!button) return;
