@@ -45,7 +45,16 @@ export async function api(request, env) {
 const TMDB_HOST='https://api.themoviedb.org/3/';
 async function cipherKey(env){return crypto.subtle.importKey('raw',Uint8Array.from(atob(env.TMDB_CONFIG_KEY),c=>c.charCodeAt(0)), 'AES-GCM',false,['encrypt','decrypt']);}
 async function storedKey(env){const row=await env.DB.prepare("SELECT body FROM app_settings WHERE name = 'tmdb'").first();if(!row)return '';const data=JSON.parse(row.body);return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:Uint8Array.from(data.iv)},await cipherKey(env),Uint8Array.from(data.data)));}
-async function upstream(path,key,params){const target=new URL(TMDB_HOST+path);target.searchParams.set('language','ja-JP');for(const [k,v] of params)if(['query','region','include_adult','include_video','page','watch_region','with_watch_providers','with_watch_monetization_types','sort_by','append_to_response'].includes(k)&&v.length<=300)target.searchParams.set(k,v);const headers={accept:'application/json'};if(/^[a-f0-9]{32}$/i.test(key))target.searchParams.set('api_key',key);else headers.Authorization='Bearer '+key;return fetch(target,{headers,signal:AbortSignal.timeout(15000)});}
+async function upstream(path,key,params){const target=new URL(TMDB_HOST+path);target.searchParams.set('language','ja-JP');for(const [k,v] of params)if(['query','region','include_adult','include_video','page','watch_region','with_watch_providers','with_watch_monetization_types','sort_by','append_to_response','with_release_type','release_date.gte','release_date.lte'].includes(k)&&v.length<=300)target.searchParams.set(k,v);const headers={accept:'application/json'};if(/^[a-f0-9]{32}$/i.test(key))target.searchParams.set('api_key',key);else headers.Authorization='Bearer '+key;return fetch(target,{headers,signal:AbortSignal.timeout(15000)});}
+// Calendar arithmetic uses the Tokyo calendar date, independent of server timezone.
+function japanWeek(now = new Date()) {
+ const today = new Date(now.toLocaleDateString('en-CA', {timeZone:'Asia/Tokyo'}) + 'T00:00:00Z');
+ const monday = new Date(today);
+ monday.setUTCDate(today.getUTCDate() - (today.getUTCDay() + 6) % 7);
+ const sunday = new Date(monday);
+ sunday.setUTCDate(monday.getUTCDate() + 6);
+ return {start:monday.toISOString().slice(0,10),end:sunday.toISOString().slice(0,10)};
+}
 async function tmdb(request,env){
  const url=new URL(request.url);
  try{
@@ -60,10 +69,16 @@ async function tmdb(request,env){
    await env.DB.prepare("INSERT INTO app_settings(name,body) VALUES('tmdb',?) ON CONFLICT(name) DO UPDATE SET body=excluded.body").bind(JSON.stringify({iv:[...iv],data:[...new Uint8Array(encrypted)]})).run();return json({connected:true});
   }
   if(request.method!=='GET')return json({error:'利用できません。'},405);
-  const path=url.pathname.slice('/api/tmdb/'.length);
-  if(!/^(configuration|search\/movie|discover\/movie|movie\/now_playing|watch\/providers\/movie|movie\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
+  let path=url.pathname.slice('/api/tmdb/'.length);
+  let params=url.searchParams;
+  if(path==='catalog/week'){
+   const week=japanWeek();
+   path='discover/movie';
+   params=new URLSearchParams({page:params.get('page')||'1',region:'JP',with_release_type:'3|2','release_date.gte':week.start,'release_date.lte':week.end,sort_by:'release_date.asc',include_adult:'false',include_video:'false'});
+  }
+  if(!/^(configuration|search\/movie|discover\/movie|movie\/now_playing|trending\/movie\/week|watch\/providers\/movie|movie\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
   const key=await storedKey(env);if(!key)return json({error:'映画情報を接続してください。'},503);
-  const result=await upstream(path,key,url.searchParams);if(!result.ok)return json({error:result.status===429?'検索が混み合っています。少し待って再度お試しください。':'映画情報を取得できませんでした。'},result.status===429?429:502);
+  const result=await upstream(path,key,params);if(!result.ok)return json({error:result.status===429?'検索が混み合っています。少し待って再度お試しください。':'映画情報を取得できませんでした。'},result.status===429?429:502);
   return json(await result.json());
  }catch{return json({error:'映画情報に接続できませんでした。時間をおいて再度お試しください。'},503);}
 }

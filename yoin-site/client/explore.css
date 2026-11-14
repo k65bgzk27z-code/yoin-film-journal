@@ -2,3 +2,6 @@
 @media(max-width:700px){.catalog{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.catalog-caption{padding:10px}.section-heading{align-items:flex-start}.section-heading h2{font-size:24px}.section-heading>button{max-width:110px}.explore-filters{gap:8px}.explore-filters label{min-width:120px}.film-actions{bottom:-22px}.main-tabs button{flex:1}.catalog-empty{padding:24px}.film-hero{gap:12px}.film-hero img{width:85px}}
 
 .random-pick{margin:0 0 24px;padding:18px;border:2px solid #68786c;border-radius:12px;background:#e9ede5}.random-pick-label{margin:0 0 12px;color:#304d40;font-weight:600}.random-pick>.card{max-width:340px;margin:auto}.random-pick>p:last-child{font-size:13px;line-height:1.7}
+
+/* Keep full release dates readable alongside saved-record badges. */
+.catalog-caption small{line-height:1.6}.explore-filters #explore-mode{color:#304d40;font-weight:600}
