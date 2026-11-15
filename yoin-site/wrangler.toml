@@ -1,0 +1,8 @@
+name = "yoin"
+main = "dist/server/index.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "yoin-db"
+database_id = "b8e6c914-5063-4955-aeab-136e6febdbdf"
