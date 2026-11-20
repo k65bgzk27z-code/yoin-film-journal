@@ -7,6 +7,22 @@ let records = [], filter = 'all', storageHealthy = false, credential = '', draft
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safePoster = value => /^https:\/\/image\.tmdb\.org\/t\/p\/w500\/[\w.-]+$/.test(value || '') ? value : '';
 const dateLabel = value => value || '情報なし';
+const METHOD_LABELS = { theater: '劇場', streaming: '配信', tv: 'TV', disc: 'DVD・BD', other: 'その他' };
+const methodLabel = (method, service) => METHOD_LABELS[method] ? METHOD_LABELS[method] + (method === 'streaming' && service ? `（${service}）` : '') : '';
+// Every viewing of a record. Records without a viewings list count as one viewing when watched.
+const viewingsOf = r => Array.isArray(r.viewings) && r.viewings.length ? r.viewings : (r.status === 'watched' ? [{ id: 'v0', date: r.date || '', method: r.method || '', service: r.service || '', rating: r.rating || 0, note: '' }] : []);
+function syncLatestViewing(r) {
+  if (!Array.isArray(r.viewings) || !r.viewings.length) return r;
+  const viewings = r.viewings.map((v, i) => [v, i]).sort((a, b) => (a[0].date || '').localeCompare(b[0].date || '') || a[1] - b[1]).map(x => x[0]);
+  const latest = viewings.at(-1);
+  return { ...r, viewings, date: latest.date || r.date, method: latest.method, service: latest.service };
+}
+function addViewing(r, v) {
+  const next = syncLatestViewing({ ...r, status: 'watched', viewings: [...(Array.isArray(r.viewings) ? r.viewings : viewingsOf(r)), v] });
+  if (v.rating > 0) next.rating = v.rating;
+  return next;
+}
+const personButton = (name, role, movie) => `<button type="button" class="person-link" data-person="${escape(name)}" data-role="${role}" data-mid="${movie.id}" data-mmedia="${movie.mediaType === 'tv' ? 'tv' : 'movie'}">${escape(name)}</button>`;
 const checkedLabel = timestamp => Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString('ja-JP') : '未確認';
 function validateRecords(rows) {
   if (!Array.isArray(rows)) throw new Error('invalid records');
@@ -64,9 +80,9 @@ function movieHTML(movie) {
   if (!movie) return '';
   const tv = movie.mediaType === 'tv';
   const facts = tv
-    ? `<p>放送開始：${escape(dateLabel(movie.releaseDate))}${movie.seasons ? `<br>シーズン：${escape(movie.seasons)}${movie.episodes ? `（全${escape(movie.episodes)}話）` : ''}` : ''}${movie.runtime ? `<br>1話あたり：約${escape(movie.runtime)}分` : ''}<br>制作：${escape(movie.directors.join('、') || '情報なし')}</p>`
-    : `<p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>`;
-  return `<section class="movie-info">${facts}${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${escape(person.name)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/${tv ? 'tv' : 'movie'}/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
+    ? `<p>放送開始：${escape(dateLabel(movie.releaseDate))}${movie.seasons ? `<br>シーズン：${escape(movie.seasons)}${movie.episodes ? `（全${escape(movie.episodes)}話）` : ''}` : ''}${movie.runtime ? `<br>1話あたり：約${escape(movie.runtime)}分` : ''}<br>制作：${movie.directors.length ? movie.directors.map(n => personButton(n, 'director', movie)).join('、') : '情報なし'}</p>`
+    : `<p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${movie.directors.length ? movie.directors.map(n => personButton(n, 'director', movie)).join('、') : '情報なし'}</p>`;
+  return `<section class="movie-info">${facts}${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${personButton(person.name, 'cast', movie)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/${tv ? 'tv' : 'movie'}/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
 }
 const randomButton = document.createElement('button');
 randomButton.id = 'random-pick';
@@ -89,6 +105,28 @@ randomButton.onclick = () => {
 function filteredRecords() {
   return records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
 }
+function viewMeta(r) {
+  const count = viewingsOf(r).length, method = methodLabel(r.method, r.service);
+  return (method ? ` <span class="view-meta">${escape(method)}</span>` : '') + (count > 1 ? ` <span class="view-meta view-count">${count}回鑑賞</span>` : '');
+}
+function viewingHistoryHTML(r) {
+  if (!Array.isArray(r.viewings) || r.viewings.length < 2) return '';
+  return `<details class="viewings"><summary>鑑賞履歴（${r.viewings.length}回）</summary><ol>${[...r.viewings].reverse().map(v => `<li><b>${escape(v.date ? v.date.replaceAll('-', '/') : '日付なし')}</b> ${escape(methodLabel(v.method, v.service))}${v.rating ? ` <span class="rating">★ ${v.rating.toFixed(1)}</span>` : ''}${v.note ? `<br><small>${escape(v.note)}</small>` : ''}</li>`).join('')}</ol></details>`;
+}
+let draftViewings = null;
+function renderViewingsEditor() {
+  const box = $('viewings-editor');
+  if (!draftViewings || draftViewings.length < 2) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="viewings-editor"><b>鑑賞履歴（${draftViewings.length}回）</b><p class="lookup-note">上の鑑賞日・鑑賞方法は最新の鑑賞に反映されます。</p><ol>${draftViewings.map((v, i) => `<li>${escape(v.date ? v.date.replaceAll('-', '/') : '日付なし')} ${escape(methodLabel(v.method, v.service))}${v.rating ? ' ★ ' + v.rating.toFixed(1) : ''}${i === draftViewings.length - 1 ? ' <small>（最新）</small>' : ` <button type="button" data-remove-viewing="${i}">削除</button>`}</li>`).join('')}</ol></div>`;
+}
+$('viewings-editor').onclick = event => {
+  const b = event.target.closest('[data-remove-viewing]');
+  if (!b || !draftViewings || !confirm('この鑑賞記録を削除しますか？（保存するまで反映されません）')) return;
+  draftViewings.splice(Number(b.dataset.removeViewing), 1);
+  renderViewingsEditor();
+};
+const toggleService = () => { $('service-field').hidden = $('method').value !== 'streaming'; };
+$('method').onchange = toggleService;
 function render() {
   if (typeof onLibraryChanged === 'function') onLibraryChanged();
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
@@ -97,7 +135,7 @@ function render() {
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
   const cardHTML = r => {
     const poster = safePoster(r.movie?.poster);
-    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
+    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}${viewMeta(r)}</p>${r.review ? (r.spoiler ? `<details class="spoiler"><summary>ネタバレを含む感想 · タップで表示</summary><p class="review">${escape(r.review)}</p></details>` : `<p class="review">${escape(r.review)}</p>`) : ''}${viewingHistoryHTML(r)}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> ${r.status === 'watched' ? `<button data-rewatch="${escape(r.id)}">＋ 再鑑賞</button> ` : ''}<button data-addlist="${escape(r.id)}">リスト</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
   };
   const selected = list.find(r => r.id === randomFilmId);
   if (!selected) randomFilmId = null;
@@ -109,7 +147,11 @@ function openRecord(record) {
   if(!storageHealthy)return;
   lookupVersion++;
   $('form').reset();
-  for (const k of ['title', 'status', 'rating', 'date', 'meta', 'review']) if (record) $(k).value = record[k] ?? '';
+  for (const k of ['title', 'status', 'rating', 'date', 'meta', 'review', 'method', 'service']) if (record) $(k).value = record[k] ?? '';
+  $('spoiler').checked = Boolean(record?.spoiler);
+  draftViewings = Array.isArray(record?.viewings) ? record.viewings.map(v => ({ ...v })) : null;
+  renderViewingsEditor();
+  toggleService();
   $('recordId').value = record?.id || '';
   draftMovie = record?.movie || null;
   $('lookup-results').innerHTML = '';
@@ -193,8 +235,20 @@ $('form').onsubmit = async event => {
     ...records.find(r=>r.id===$('recordId').value),
     id: $('recordId').value || crypto.randomUUID(), title, status: $('status').value,
     rating: Number($('rating').value), date: $('date').value, meta: $('meta').value.trim(),
-    review: $('review').value.trim(), updated: Date.now(), ...(draftMovie ? { movie: draftMovie } : {})
+    review: $('review').value.trim(), updated: Date.now(), ...(draftMovie ? { movie: draftMovie } : {}),
+    method: $('method').value, service: $('method').value === 'streaming' ? $('service').value.trim() : '', spoiler: $('spoiler').checked
   };
+  delete record.viewings;
+  if (draftViewings?.length) {
+    // The form's date / method edit the newest viewing.
+    const viewings = draftViewings.map(v => ({ ...v }));
+    Object.assign(viewings[viewings.length - 1], { date: record.date, method: record.method, service: record.service });
+    Object.assign(record, syncLatestViewing({ ...record, viewings }));
+  }
+  const saved = records.find(r => r.id === record.id);
+  if (!saved?.method && !record.method) delete record.method;
+  if (!saved?.service && !record.service) delete record.service;
+  if (!saved?.spoiler && !record.spoiler) delete record.spoiler;
   if (await persist([...records.filter(r => r.id !== record.id), record])) $('modal').close();
 };
 document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => {
@@ -218,6 +272,8 @@ $('grid').onclick = async event => {
   }
   if (!storageHealthy) return;
   if (button.dataset.edit) openRecord(records.find(r => r.id === button.dataset.edit));
+  if (button.dataset.rewatch) openRewatch(records.find(r => r.id === button.dataset.rewatch));
+  if (button.dataset.addlist) openListPick(records.find(r => r.id === button.dataset.addlist));
   if (button.dataset.delete && confirm('この映画の記録を削除しますか？')) await persist(records.filter(r => r.id !== button.dataset.delete));
   if (button.dataset.info) {
     const record = records.find(r => r.id === button.dataset.info);
@@ -262,7 +318,7 @@ render();
 if(window.matchMedia('(display-mode: standalone)').matches||navigator.standalone)$('install-guide').hidden=true;
 $('app-status').textContent='記録は本人専用の保存先に同期します。閲覧・保存には通信が必要です。';
 initialize();
-window.addEventListener('focus',()=>{if(ready&&!$('modal').open&&!$('film-detail').open&&!$('connection').open)refresh().catch(e=>{$('notice').textContent=e.message;});});
+window.addEventListener('focus',()=>{if(ready&&!document.querySelector('dialog[open]'))refresh().catch(e=>{$('notice').textContent=e.message;});});
 
 function findFilmRecord(film){
  const exact=records.find(r=>r.movie?.id===film.id&&(r.movie?.mediaType||'movie')===(film.mediaType||'movie'));if(exact)return exact;
