@@ -41,6 +41,9 @@ export async function yoinGate(request, env, path) {
   if (path === '/logout') {
     return new Response(null, { status: 303, headers: { 'Location': '/login', 'Set-Cookie': 'yoin_auth=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0', 'Cache-Control': 'no-store' } });
   }
+  // /api/bot/* is authenticated by its own bearer token inside botApi() (worker/bot-api.mjs),
+  // never by the cookie; the bearer token is not accepted anywhere else.
+  if (path.startsWith('/api/bot/')) return request;
   const token = await yoinAuthToken(env);
   if (yoinSame(yoinCookieValue(request, 'yoin_auth'), token)) {
     const headers = new Headers(request.headers);
