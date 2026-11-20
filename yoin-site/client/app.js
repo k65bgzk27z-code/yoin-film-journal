@@ -15,7 +15,7 @@ function validateRecords(rows) {
     if (!r || typeof r.id !== 'string' || !r.id || ids.has(r.id) || typeof r.title !== 'string' || !r.title.trim() || !['watched', 'want'].includes(r.status) || (!Number.isFinite(r.rating) || Math.abs(r.rating*10-Math.round(r.rating*10))>0.000001) || r.rating < 0 || r.rating > 5 || !Number.isFinite(r.updated) || ['date', 'meta', 'review'].some(k => typeof r[k] !== 'string')) throw new Error('invalid record');
     if (r.movie != null) {
       const m = r.movie;
-      if (m.source !== 'TMDB' || !Number.isInteger(m.id) || m.id < 1 || ['title', 'originalTitle', 'releaseDate', 'japanTheatricalDate', 'overview', 'poster'].some(k => typeof m[k] !== 'string') || !Number.isFinite(m.checkedAt) || !Array.isArray(m.directors) || !Array.isArray(m.genres) || [...m.directors, ...m.genres].some(x => typeof x !== 'string')) throw new Error('invalid movie');
+      if (m.source !== 'TMDB' || !Number.isInteger(m.id) || m.id < 1 || (m.mediaType != null && !['movie', 'tv'].includes(m.mediaType)) || (m.seasons != null && !Number.isInteger(m.seasons)) || (m.episodes != null && !Number.isInteger(m.episodes)) || ['title', 'originalTitle', 'releaseDate', 'japanTheatricalDate', 'overview', 'poster'].some(k => typeof m[k] !== 'string') || !Number.isFinite(m.checkedAt) || !Array.isArray(m.directors) || !Array.isArray(m.genres) || [...m.directors, ...m.genres].some(x => typeof x !== 'string')) throw new Error('invalid movie');
       if (m.cast != null && (!Array.isArray(m.cast) || m.cast.some(p => !p || typeof p.name !== 'string' || typeof p.character !== 'string'))) throw new Error('invalid cast');
       if (m.providers != null) {
         const p = m.providers;
@@ -51,13 +51,22 @@ function providerHTML(movie) {
     const stale = Date.now() - providers.checkedAt > 86400000;
     html += `<p class="source ${stale || movie.providerError ? 'pending' : ''}">確認日：${checkedLabel(providers.checkedAt)}${stale ? ' · 古い情報です。視聴前に更新してください。' : ''}${movie.providerError ? ' · 今回の更新に失敗したため、前回の情報を表示しています。' : ''}</p>`;
   }
-  const link = `https://www.themoviedb.org/movie/${movie.id}/watch?locale=JP`;
+  const link = `https://www.themoviedb.org/${movie.mediaType === 'tv' ? 'tv' : 'movie'}/${movie.id}/watch?locale=JP`;
   html += `<a href="${link}" target="_blank" rel="noopener noreferrer">視聴先・最新条件を確認 ↗</a><p class="source">配信情報：JustWatch（TMDB経由）。追加契約が必要なチャンネルを含む場合があります。</p></div>`;
   return html;
 }
+function kindLabel(movie) {
+  if (!movie) return '映画';
+  if ((movie.genres || []).includes('アニメーション')) return 'アニメ';
+  return movie.mediaType === 'tv' ? 'ドラマ' : '映画';
+}
 function movieHTML(movie) {
   if (!movie) return '';
-  return `<section class="movie-info"><p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${escape(person.name)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/movie/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
+  const tv = movie.mediaType === 'tv';
+  const facts = tv
+    ? `<p>放送開始：${escape(dateLabel(movie.releaseDate))}${movie.seasons ? `<br>シーズン：${escape(movie.seasons)}${movie.episodes ? `（全${escape(movie.episodes)}話）` : ''}` : ''}${movie.runtime ? `<br>1話あたり：約${escape(movie.runtime)}分` : ''}<br>制作：${escape(movie.directors.join('、') || '情報なし')}</p>`
+    : `<p>初公開：${escape(dateLabel(movie.releaseDate))}<br>日本の劇場公開：${escape(dateLabel(movie.japanTheatricalDate))}${movie.runtime ? `<br>上映時間：${escape(movie.runtime)}分` : ''}<br>監督：${escape(movie.directors.join('、') || '情報なし')}</p>`;
+  return `<section class="movie-info">${facts}${movie.genres.length ? `<p>${escape(movie.genres.join(' / '))}</p>` : ''}${movie.overview ? `<details><summary>あらすじを読む</summary><p>${escape(movie.overview)}</p></details>` : '<p class="source">日本語のあらすじは未登録です。</p>'}${movie.cast?.length ? `<p>主な出演者</p><ul class="cast">${movie.cast.map(person => `<li>${escape(person.name)}${person.character ? `<small>${escape(person.character)}</small>` : ''}</li>`).join('')}</ul>` : ''}${providerHTML(movie)}<p class="source">作品情報：<a href="https://www.themoviedb.org/${tv ? 'tv' : 'movie'}/${movie.id}" target="_blank" rel="noopener noreferrer">TMDB</a> · ${checkedLabel(movie.checkedAt)}取得</p></section>`;
 }
 const randomButton = document.createElement('button');
 randomButton.id = 'random-pick';
@@ -88,7 +97,7 @@ function render() {
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
   const cardHTML = r => {
     const poster = safePoster(r.movie?.poster);
-    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>映画情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '映画情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
+    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}</p>${r.review ? `<p class="review">${escape(r.review)}</p>` : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
   };
   const selected = list.find(r => r.id === randomFilmId);
   if (!selected) randomFilmId = null;
@@ -126,8 +135,8 @@ async function searchMovies() {
   try {
     const list = await FilmAPI.search(query, credential);
     if (version !== lookupVersion || !$('modal').open) return;
-    $('lookup-status').textContent = list.length ? '公開年・ポスターを確認して作品を選んでください。' : '作品が見つかりませんでした。別の表記や原題でも検索できます。';
-    $('lookup-results').innerHTML = list.map(m => `<button type="button" class="result" data-movie="${m.id}">${safePoster(m.poster) ? `<img src="${m.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span><strong>${escape(m.title)}</strong><small>${escape(m.releaseDate.slice(0, 4) || '公開年不明')} · ${escape(m.originalTitle)}</small><small>${escape(m.overview.slice(0, 90))}</small></span></button>`).join('');
+    $('lookup-status').textContent = list.length ? '公開年・ポスターを確認して作品を選んでください。映画・アニメ・ドラマが混ざって表示されます。' : '作品が見つかりませんでした。別の表記や原題でも検索できます。';
+    $('lookup-results').innerHTML = list.map(m => `<button type="button" class="result" data-movie="${m.id}" data-media="${m.mediaType}">${safePoster(m.poster) ? `<img src="${m.poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}<span><strong>${escape(m.title)}</strong><small>${escape(FilmAPI.kindOf(m))} · ${escape(m.releaseDate.slice(0, 4) || '公開年不明')} · ${escape(m.originalTitle)}</small><small>${escape(m.overview.slice(0, 90))}</small></span></button>`).join('');
   } catch (error) {
     if (version === lookupVersion) $('lookup-status').textContent = error.message;
   } finally { if (version === lookupVersion) $('lookup').disabled = false; }
@@ -140,7 +149,7 @@ $('lookup-results').onclick = async event => {
   $('lookup-results').innerHTML = '';
   $('lookup-status').textContent = '作品情報と日本の配信先を取得しています…';
   try {
-    const movie = await FilmAPI.details(Number(button.dataset.movie), credential);
+    const movie = await FilmAPI.details(Number(button.dataset.movie), credential, null, button.dataset.media);
     if (version !== lookupVersion || !$('modal').open) return;
     draftMovie = movie;
     if (!$('recordId').value) $('title').value = movie.title;
@@ -217,10 +226,10 @@ $('grid').onclick = async event => {
     button.disabled = true;
     button.textContent = '更新中…';
     try {
-      const movie = await FilmAPI.details(record.movie.id, credential, record.movie);
+      const movie = await FilmAPI.details(record.movie.id, credential, record.movie, record.movie.mediaType);
       // Read the latest record after the request so concurrent personal edits survive.
       const latest = records.find(r => r.id === record.id);
-      if (latest && latest.movie?.id === record.movie.id) await persist(records.map(r => r.id === record.id ? { ...r, movie } : r));
+      if (latest && latest.movie?.id === record.movie.id && (latest.movie?.mediaType || 'movie') === (record.movie.mediaType || 'movie')) await persist(records.map(r => r.id === record.id ? { ...r, movie } : r));
     } catch (error) { alert(error.message); }
     finally { button.disabled = false; button.textContent = '情報を更新'; }
   }
@@ -256,7 +265,7 @@ initialize();
 window.addEventListener('focus',()=>{if(ready&&!$('modal').open&&!$('film-detail').open&&!$('connection').open)refresh().catch(e=>{$('notice').textContent=e.message;});});
 
 function findFilmRecord(film){
- const exact=records.find(r=>r.movie?.id===film.id);if(exact)return exact;
+ const exact=records.find(r=>r.movie?.id===film.id&&(r.movie?.mediaType||'movie')===(film.mediaType||'movie'));if(exact)return exact;
  const normalized=s=>s.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
  const candidates=records.filter(r=>normalized(r.title)===normalized(film.title));
  const year=(film.releaseDate||'').slice(0,4);
