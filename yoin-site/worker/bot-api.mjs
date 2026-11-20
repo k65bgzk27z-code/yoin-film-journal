@@ -3,7 +3,7 @@
 // The token is never accepted on any other path, and this API can only search,
 // list, create and partially update records — no delete, import, TMDB
 // connection or enrichment. Created records use the same shape as the UI.
-const BOT_FIELDS = ['status', 'rating', 'date', 'review', 'meta'];
+const BOT_FIELDS = ['status', 'rating', 'date', 'review', 'meta', 'spoiler', 'method', 'service', 'viewings'];
 const botJson = (data, status = 200) => Response.json(data, {status, headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 function botAuthorized(request, env) {
   const token = typeof env.BOT_API_TOKEN === 'string' ? env.BOT_API_TOKEN : '';
@@ -32,7 +32,7 @@ function botFieldError(data) {
   if ('rating' in data && (typeof data.rating !== 'number' || !Number.isFinite(data.rating) || data.rating < 0 || data.rating > 5 || Math.abs(data.rating * 10 - Math.round(data.rating * 10)) > 0.000001)) return 'rating は 0〜5 の数値（小数第1位まで、0 は未評価）で指定してください。';
   if ('date' in data && (typeof data.date !== 'string' || (data.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(data.date)))) return 'date は "YYYY-MM-DD" か空文字で指定してください。';
   for (const k of ['review', 'meta']) if (k in data && (typeof data[k] !== 'string' || data[k].length > 100000)) return k + ' は文字列で指定してください。';
-  return '';
+  return extrasError(data);
 }
 const botDate = v => /^\d{4}-\d{2}-\d{2}/.test(v || '') ? v.slice(0, 10) : '';
 const botText = v => typeof v === 'string' ? v : '';
@@ -175,6 +175,8 @@ async function botCreate(request, env) {
     rating: data.rating ?? 0, date: data.date ?? '', meta: (data.meta ?? '').trim(), review: (data.review ?? '').trim(),
     updated: Date.now(), ...(movie ? {movie} : {})
   };
+  for (const k of ['spoiler', 'method', 'service', 'viewings']) if (k in data) record[k] = data[k];
+  Object.assign(record, syncLatestViewing(record));
   if (!botClientValid(record)) return botJson({error: '記録の形式が正しくありません。'}, 400);
   const body = JSON.stringify(record);
   // Atomic duplicate guard: insert only if no record already has this TMDB id + media type.
@@ -201,7 +203,8 @@ async function botUpdate(request, env, id) {
   const current = JSON.parse(row.body);
   if (row.revision !== data._revision) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。', record: {...current, _revision: row.revision}}, 409);
   const next = {...current, updated: Date.now()};
-  for (const k of BOT_FIELDS) if (k in data) next[k] = (k === 'review' || k === 'meta') ? data[k].trim() : data[k];
+  for (const k of BOT_FIELDS) if (k in data) next[k] = (k === 'review' || k === 'meta' || k === 'service') ? data[k].trim() : data[k];
+  if ('viewings' in data) Object.assign(next, syncLatestViewing(next));
   if (!botClientValid(next)) return botJson({error: '記録の形式が正しくありません。'}, 400);
   const result = await env.DB.prepare('UPDATE films SET body = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(JSON.stringify(next), id, data._revision).run();
   if (result.meta.changes !== 1) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。'}, 409);
@@ -221,6 +224,8 @@ async function botApi(request, env) {
       if (method === 'POST') return await botCreate(request, env);
       return botJson({error: 'この操作は利用できません。'}, 405);
     }
+    const extra = await botFeatureRoute(request, env, url, path, method);
+    if (extra) return extra;
     const m = /^\/api\/bot\/records\/([^/]+)$/.exec(path);
     if (m) {
       let id;
@@ -235,4 +240,60 @@ async function botApi(request, env) {
     if (e instanceof BotTmdbError) return botJson({error: e.message}, e.status);
     return botJson({error: '処理できませんでした。時間をおいて再度お試しください。'}, 503);
   }
+}
+
+// Viewings, lists and notices for the bot (same rules as the UI).
+async function botAddViewing(request, env, id) {
+  const data = await request.json().catch(() => null);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return botJson({error: 'JSON の本文が必要です。'}, 400);
+  if (!Number.isInteger(data._revision) || data._revision < 1) return botJson({error: '_revision を指定してください。'}, 409);
+  const viewing = { id: crypto.randomUUID(), date: data.date ?? '', method: data.method ?? '', service: typeof data.service === 'string' ? data.service.trim() : (data.service ?? ''), rating: data.rating ?? 0, note: typeof data.note === 'string' ? data.note.trim() : (data.note ?? '') };
+  const e = viewingError(viewing);
+  if (e) return botJson({error: e}, 400);
+  const row = await env.DB.prepare('SELECT body, revision FROM films WHERE id = ?').bind(id).first();
+  if (!row) return botJson({error: '記録が見つかりません。'}, 404);
+  const current = JSON.parse(row.body);
+  if (row.revision !== data._revision) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。', record: {...current, _revision: row.revision}}, 409);
+  const next = {...addViewing(current, viewing), updated: Date.now()};
+  if (!botClientValid(next)) return botJson({error: '記録の形式が正しくありません。'}, 400);
+  const result = await env.DB.prepare('UPDATE films SET body = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(JSON.stringify(next), id, data._revision).run();
+  if (result.meta.changes !== 1) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。'}, 409);
+  return botJson({record: {...next, _revision: data._revision + 1}, viewCount: viewCount(next)}, 201);
+}
+async function botListWithItems(env, list) {
+  const ids = list.items.map(i => i.recordId);
+  const rows = ids.length ? (await env.DB.prepare('SELECT id, body, revision FROM films WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all()).results : [];
+  const byId = new Map(rows.map(r => [r.id, {...JSON.parse(r.body), _revision: r.revision}]));
+  return {...list, items: list.items.map((it, i) => { const r = byId.get(it.recordId); return {...it, rank: i + 1, record: r ? {...botBrief(r), tmdbId: r.movie?.id ?? null, mediaType: r.movie ? botMedia(r) : null} : null}; })};
+}
+async function botFeatureRoute(request, env, url, path, method) {
+  const no = () => botJson({error: 'この操作は利用できません。'}, 405);
+  const send = ([status, data]) => botJson(data, status);
+  const body = () => request.json().catch(() => null);
+  let m = /^\/api\/bot\/records\/([^/]+)\/viewings$/.exec(path);
+  if (m) {
+    let id; try { id = decodeURIComponent(m[1]); } catch { return botJson({error: 'IDが不正です。'}, 400); }
+    return method === 'POST' ? botAddViewing(request, env, id) : no();
+  }
+  if (path === '/api/bot/lists') {
+    if (method === 'GET') return botJson({lists: (await listsList(env)).map(l => ({...l, itemCount: l.items.length}))});
+    if (method === 'POST') { const [status, data] = await listCreate(env, await body(), {requireExisting: true}); return botJson(data.list ? {list: await botListWithItems(env, data.list)} : data, status); }
+    return no();
+  }
+  m = /^\/api\/bot\/lists\/([^/]+)$/.exec(path);
+  if (m) {
+    let id; try { id = decodeURIComponent(m[1]); } catch { return botJson({error: 'IDが不正です。'}, 400); }
+    if (method === 'GET') { const l = await listGet(env, id); return l ? botJson({list: await botListWithItems(env, l)}) : botJson({error: 'リストが見つかりません。'}, 404); }
+    if (method === 'PATCH') {
+      const input = await body();
+      const extra = input && typeof input === 'object' ? Object.keys(input).filter(k => !['_revision', 'name', 'description', 'items'].includes(k)) : [];
+      if (extra.length) return botJson({error: '変更できない項目です: ' + extra.join(', ') + '（変更できるのは name, description, items）'}, 400);
+      const [status, data] = await listUpdate(env, id, input, {requireExisting: true});
+      return botJson(data.list && status === 200 ? {list: await botListWithItems(env, data.list)} : data, status);
+    }
+    return no();
+  }
+  if (path === '/api/bot/notices') return method === 'GET' ? botJson(await noticesList(env, {unreadOnly: url.searchParams.get('unread') === '1', limit: url.searchParams.get('limit') || 50})) : no();
+  if (path === '/api/bot/notices/read') return method === 'POST' ? send(await noticesMarkRead(env, await body())) : no();
+  return null;
 }

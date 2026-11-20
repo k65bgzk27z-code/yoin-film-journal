@@ -1,6 +1,6 @@
 const json = (data, status = 200) => Response.json(data, {status, headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 function validate(r) {
-  return r && typeof r.id==='string' && r.id.length>0 && r.id.length<=200 && typeof r.title==='string' && r.title.trim() && r.title.length<=1000 && ['watched','want'].includes(r.status) && Number.isFinite(r.rating) && r.rating>=0 && r.rating<=5 && Number.isFinite(r.updated) && ['date','meta','review'].every(k=>typeof r[k]==='string' && r[k].length<=100000);
+  return r && typeof r.id==='string' && r.id.length>0 && r.id.length<=200 && typeof r.title==='string' && r.title.trim() && r.title.length<=1000 && ['watched','want'].includes(r.status) && Number.isFinite(r.rating) && r.rating>=0 && r.rating<=5 && Number.isFinite(r.updated) && ['date','meta','review'].every(k=>typeof r[k]==='string' && r[k].length<=100000) && extrasValid(r);
 }
 function clean(r) { const {_revision,...body}=r; return body; }
 export async function api(request, env) {
@@ -12,6 +12,7 @@ export async function api(request, env) {
   if(request.method!=='GET' && (request.headers.get('Origin')!==url.origin || !request.headers.get('Content-Type')?.startsWith('application/json')))return json({error:'この画面から操作してください。'},403);
   try {
     if(url.pathname==='/api/enrich')return await enrichBatch(request,env);
+    if(/^\/api\/(lists|notices)(\/|$)/.test(url.pathname))return await featureApi(request,env,url);
     if(url.pathname==='/api/records' && request.method==='GET') {
       const {results}=await env.DB.prepare('SELECT body, revision FROM films ORDER BY id').all();
       return json({records:results.map(r=>({...JSON.parse(r.body),_revision:r.revision}))});
@@ -77,7 +78,7 @@ async function tmdb(request,env){
    path='discover/movie';
    params=new URLSearchParams({page:params.get('page')||'1',region:'JP',with_release_type:'3|2','release_date.gte':week.start,'release_date.lte':week.end,sort_by:'release_date.asc',include_adult:'false',include_video:'false'});
   }
-  if(!/^(configuration|search\/(?:movie|tv)|discover\/(?:movie|tv)|movie\/now_playing|trending\/(?:movie|tv)\/week|watch\/providers\/(?:movie|tv)|(?:movie|tv)\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
+  if(!/^(configuration|search\/(?:movie|tv)|discover\/(?:movie|tv)|search\/person|person\/[1-9]\d*|movie\/now_playing|trending\/(?:movie|tv)\/week|watch\/providers\/(?:movie|tv)|(?:movie|tv)\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
   const key=await storedKey(env);if(!key)return json({error:'映画情報を接続してください。'},503);
   const result=await upstream(path,key,params);if(!result.ok)return json({error:result.status===429?'検索が混み合っています。少し待って再度お試しください。':'映画情報を取得できませんでした。'},result.status===429?429:502);
   return json(await result.json());

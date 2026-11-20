@@ -4,9 +4,10 @@ let selectedFilm = null, providersLoaded = false, currentTab = 'library', catalo
 
 function switchTab(tab) {
   currentTab = tab;
-  $('explore').hidden = tab !== 'explore';
-  $('library').hidden = tab !== 'library';
-  for (const name of ['explore', 'library']) {
+  const sections = { explore: 'explore', library: 'library', lists: 'lists', stats: 'stats-view', notices: 'notices' };
+  for (const [name, section] of Object.entries(sections)) $(section).hidden = tab !== name;
+  if (typeof onTabShown === 'function') onTabShown(tab);
+  for (const name of Object.keys(sections)) {
     $(`tab-${name}`).classList.toggle('active', name === tab);
     $(`tab-${name}`).setAttribute('aria-pressed', String(name === tab));
   }
@@ -25,6 +26,7 @@ function catalogHTML() {
 }
 function onLibraryChanged() {
   if (catalog.length) $('explore-grid').innerHTML = catalogHTML();
+  if (typeof onFeaturesLibraryChanged === 'function') onFeaturesLibraryChanged();
 }
 function disconnectedCatalog() {
   catalogVersion++;
@@ -134,6 +136,7 @@ async function openFilm(id, mediaType = 'movie') {
 }
 $('tab-explore').onclick = () => switchTab('explore');
 $('tab-library').onclick = () => switchTab('library');
+for (const name of ['lists', 'stats', 'notices']) $(`tab-${name}`).onclick = () => switchTab(name);
 $('explore-connect').onclick = showConnection;
 $('explore-search-form').onsubmit = event => {
   event.preventDefault();

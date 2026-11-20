@@ -6,3 +6,7 @@ compatibility_date = "2026-11-01"
 binding = "DB"
 database_name = "yoin-db"
 database_id = "b8e6c914-5063-4955-aeab-136e6febdbdf"
+
+# Want-list notices: check 10 titles every 30 minutes (TMDB: 1 request per title; well within free tier).
+[triggers]
+crons = ["*/30 * * * *"]

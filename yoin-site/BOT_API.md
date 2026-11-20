@@ -13,8 +13,8 @@
 
 ## できること / できないこと
 
-できる: 作品検索、棚の検索、記録の追加、評価・感想などの部分更新。
-できない: 削除、一括読み込み（import）、TMDB接続設定、自動情報付与（enrich）、作品名・作品情報（movie）の書き換え。
+できる: 作品検索、棚の検索、記録の追加、評価・感想・鑑賞方法・ネタバレなどの部分更新、再鑑賞の追加、リストの閲覧・作成・編集、お知らせの取得・既読化。
+できない: 削除（記録・リストとも）、一括読み込み（import）、TMDB接続設定、自動情報付与（enrich）、作品名・作品情報（movie）の書き換え。
 
 ## エンドポイント
 
@@ -47,15 +47,54 @@ TMDBで映画とドラマ・アニメ（TV）を日本語で検索し、人気�
 ```json
 {"_revision":1,"rating":5,"review":"もう一度観たら最高だった"}
 ```
-- 変更できるのは `status` / `rating` / `date` / `review` / `meta` のみ。それ以外の項目を送ると `400`。
+- 変更できるのは `status` / `rating` / `date` / `review` / `meta` / `spoiler` / `method` / `service` / `viewings` のみ。それ以外の項目を送ると `400`。
+- `viewings` を送ると配列全体を置き換え、`date` / `method` / `service` は最新の鑑賞に合わせて自動で更新されます（再鑑賞を1件足すだけなら下の `POST .../viewings` が簡単です）。
 - `_revision` 必須。最新でなければ `409`（`record` に最新の記録）。
 - 成功時 `{"record": {...,"_revision":2}}`
+
+### 追加項目（すべて省略可。既存の記録にはありません）
+| 項目 | 内容 |
+|---|---|
+| `method` | 鑑賞方法: `theater`（劇場）/ `streaming`（配信）/ `tv`（TV）/ `disc`（DVD・BD）/ `other`（その他）/ `""` |
+| `service` | 配信サービス名（`method` が `streaming` のとき。100文字まで） |
+| `spoiler` | `true` なら感想はネタバレとして画面でタップするまで隠されます |
+| `viewings` | 鑑賞の履歴（古い順）。各要素 `{"id","date":"YYYY-MM-DD"か"","method","service","rating":0〜5,"note"}`。ない記録は「鑑賞済みなら1回」と数えます |
+
+`POST /api/bot/records` でも `method` / `service` / `spoiler` / `viewings` を指定できます。
+
+### `POST /api/bot/records/:id/viewings`（再鑑賞を追加）
+```json
+{"_revision":3,"date":"2026-11-21","method":"streaming","service":"U-NEXT","rating":4.5,"note":"2回目"}
+```
+- `_revision` 必須（違えば `409`）。`date` / `method` / `service` / `rating`（0＝付けない）/ `note` は省略可。
+- 初めての再鑑賞では、今までの鑑賞（記録の `date` / `method` / `rating`）を1回目として履歴に入れてから追加します。
+- 記録の `date` / `method` / `service` は最新の鑑賞日の鑑賞に、`rating` は今回の評価（付けた場合のみ）に更新。`status` は `watched` になります。
+- 成功時 `201` `{"record": {...}, "viewCount": 2}`
+
+### リスト
+- `GET /api/bot/lists` → `{"lists":[{"id","name","description","items":[{"recordId","title","note"}],"itemCount","created","updated","_revision"}]}`（更新が新しい順）
+- `GET /api/bot/lists/:id` → `{"list": {..., "items":[{"recordId","title","note","rank":1,"record":{"id","title","status","rating","date","_revision","tmdbId","mediaType"}|null}]}}`
+- `POST /api/bot/lists` `{"name":"生涯ベスト10","description":"","items":["記録ID", {"recordId":"記録ID","note":"一言"}]}` → `201`。`items` は棚にある記録のIDのみ（ないIDは `400`）。順番がそのまま順位です。
+- `PATCH /api/bot/lists/:id` `{"_revision":1,"name"?,"description"?,"items"?}` → `items` は全体を置き換え（並べ替え・追加・削除はこれで）。`_revision` が違えば `409`。
+- リストの削除はボットからはできません（画面からのみ）。
+
+### お知らせ
+「観たい」の作品（TMDB連携済み）を30分ごとに10件ずつ確認し（Cron Trigger）、次のときにお知らせを作ります。
+- `stream`: 日本の見放題・無料・広告付き無料の配信サービスが前回の確認より増えた（初回は記録に保存されていた配信情報と比べます）
+- `digital`: 配信が何もなかった作品がレンタル・購入で観られるようになった
+- `release-soon`: 日本公開日（TVは放送開始日）が14日以内
+- `release`: 日本公開日を迎えた（7日以内）
+
+同じお知らせは二重に作りません。記録そのものは書き換えません。
+
+- `GET /api/bot/notices?unread=1&limit=50` → `{"unread": 未読数, "progress":{"watching","checked","lastChecked"}, "notices":[{"id","kind","recordId","title","tmdbId","mediaType","poster","provider"?,"date"?,"message","created","read"}]}`（新しい順、`limit` 最大200）
+- `POST /api/bot/notices/read` `{"ids":["..."]}` または `{"all":true}` → `{"marked": 件数}`
 
 ## エラー
 `{"error": "日本語のメッセージ"}`。TMDB未接続・接続不可は `503`、TMDB側の失敗は `502`、混雑は `429`、TMDBに作品がない場合は `404`。
 
 ## テスト
 ```sh
-node build.mjs && node --test test/bot-api.test.mjs
+node build.mjs && node --test test/*.test.mjs
 ```
 （Node 22.5以上。D1の代わりに `node:sqlite`、TMDBはモック）
