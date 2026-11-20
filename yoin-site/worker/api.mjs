@@ -45,7 +45,7 @@ export async function api(request, env) {
 const TMDB_HOST='https://api.themoviedb.org/3/';
 async function cipherKey(env){return crypto.subtle.importKey('raw',Uint8Array.from(atob(env.TMDB_CONFIG_KEY),c=>c.charCodeAt(0)), 'AES-GCM',false,['encrypt','decrypt']);}
 async function storedKey(env){const row=await env.DB.prepare("SELECT body FROM app_settings WHERE name = 'tmdb'").first();if(!row)return '';const data=JSON.parse(row.body);return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:Uint8Array.from(data.iv)},await cipherKey(env),Uint8Array.from(data.data)));}
-async function upstream(path,key,params){const target=new URL(TMDB_HOST+path);target.searchParams.set('language','ja-JP');for(const [k,v] of params)if(['query','region','include_adult','include_video','page','watch_region','with_watch_providers','with_watch_monetization_types','sort_by','append_to_response','with_release_type','release_date.gte','release_date.lte'].includes(k)&&v.length<=300)target.searchParams.set(k,v);const headers={accept:'application/json'};if(/^[a-f0-9]{32}$/i.test(key))target.searchParams.set('api_key',key);else headers.Authorization='Bearer '+key;return fetch(target,{headers,signal:AbortSignal.timeout(15000)});}
+async function upstream(path,key,params){const target=new URL(TMDB_HOST+path);target.searchParams.set('language','ja-JP');for(const [k,v] of params)if(['query','region','include_adult','include_video','page','watch_region','with_watch_providers','with_watch_monetization_types','sort_by','append_to_response','with_release_type','release_date.gte','release_date.lte','with_genres','without_genres','with_original_language','first_air_date.gte','first_air_date.lte','air_date.gte','air_date.lte'].includes(k)&&v.length<=300)target.searchParams.set(k,v);const headers={accept:'application/json'};if(/^[a-f0-9]{32}$/i.test(key))target.searchParams.set('api_key',key);else headers.Authorization='Bearer '+key;return fetch(target,{headers,signal:AbortSignal.timeout(15000)});}
 // Calendar arithmetic uses the Tokyo calendar date, independent of server timezone.
 function japanWeek(now = new Date()) {
  const today = new Date(now.toLocaleDateString('en-CA', {timeZone:'Asia/Tokyo'}) + 'T00:00:00Z');
@@ -76,7 +76,7 @@ async function tmdb(request,env){
    path='discover/movie';
    params=new URLSearchParams({page:params.get('page')||'1',region:'JP',with_release_type:'3|2','release_date.gte':week.start,'release_date.lte':week.end,sort_by:'release_date.asc',include_adult:'false',include_video:'false'});
   }
-  if(!/^(configuration|search\/movie|discover\/movie|movie\/now_playing|trending\/movie\/week|watch\/providers\/movie|movie\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
+  if(!/^(configuration|search\/(?:movie|tv)|discover\/(?:movie|tv)|movie\/now_playing|trending\/(?:movie|tv)\/week|watch\/providers\/(?:movie|tv)|(?:movie|tv)\/[1-9]\d*(?:\/watch\/providers)?)$/.test(path))return json({error:'見つかりません。'},404);
   const key=await storedKey(env);if(!key)return json({error:'映画情報を接続してください。'},503);
   const result=await upstream(path,key,params);if(!result.ok)return json({error:result.status===429?'検索が混み合っています。少し待って再度お試しください。':'映画情報を取得できませんでした。'},result.status===429?429:502);
   return json(await result.json());

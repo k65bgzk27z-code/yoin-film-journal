@@ -24,61 +24,111 @@ const FilmAPI = (() => {
       throw error;
     } finally { clearTimeout(timeout); }
   }
-  function summaries(data) {
-    return (data.results || []).map(movie => ({
-      id: movie.id, title: text(movie.title), originalTitle: text(movie.original_title),
-      releaseDate: date(movie.release_date), poster: image(movie.poster_path), overview: text(movie.overview)
-    })).filter(movie => Number.isInteger(movie.id) && movie.id > 0);
+  function summaries(data, mediaType = 'movie') {
+    return (data.results || []).map(item => ({
+      id: item.id, mediaType,
+      title: text(item.title || item.name), originalTitle: text(item.original_title || item.original_name),
+      releaseDate: date(item.release_date || item.first_air_date), poster: image(item.poster_path), overview: text(item.overview),
+      genreIds: Array.isArray(item.genre_ids) ? item.genre_ids.filter(Number.isInteger) : [],
+      popularity: Number.isFinite(item.popularity) ? item.popularity : 0
+    })).filter(item => Number.isInteger(item.id) && item.id > 0);
+  }
+  function kindOf(item) {
+    if ((item.genres || []).includes('アニメーション') || (item.genreIds || []).includes(16)) return 'アニメ';
+    return item.mediaType === 'tv' ? 'ドラマ' : '映画';
   }
   async function search(query, credential) {
-    return summaries(await request('search/movie', credential, { query, region: 'JP', include_adult: 'false' }));
+    const [movies, shows] = await Promise.allSettled([
+      request('search/movie', credential, { query, region: 'JP', include_adult: 'false' }),
+      request('search/tv', credential, { query, include_adult: 'false' })
+    ]);
+    const merged = [
+      ...(movies.status === 'fulfilled' ? summaries(movies.value, 'movie') : []),
+      ...(shows.status === 'fulfilled' ? summaries(shows.value, 'tv') : [])
+    ];
+    if (!merged.length && movies.status === 'rejected') throw movies.reason;
+    if (!merged.length && shows.status === 'rejected') throw shows.reason;
+    return merged.sort((a, b) => b.popularity - a.popularity);
   }
   async function browse(options, credential) {
     const page = Math.min(500, Math.max(1, Number(options.page) || 1));
+    const media = options.media === 'tv' ? 'tv' : 'movie';
     let data;
-    if (options.query) data = await request('search/movie', credential, { query: options.query, region: 'JP', include_adult: 'false', page });
-    else if (options.mode === 'now' && !options.provider) data = await request('movie/now_playing', credential, { region: 'JP', page });
-    else {
-      const params = { include_adult: 'false', include_video: 'false', sort_by: 'popularity.desc', page };
-      if (options.provider) Object.assign(params, { watch_region: 'JP', with_watch_providers: options.provider, with_watch_monetization_types: options.monetization || 'flatrate' });
-      data = await request('discover/movie', credential, params);
+    if (options.query) {
+      if (media === 'tv') data = await request('search/tv', credential, { query: options.query, include_adult: 'false', page });
+      else if (options.mode === 'all') { const merged = await search(options.query, credential); return { movies: merged, page: 1, totalPages: 1 }; }
+      else data = await request('search/movie', credential, { query: options.query, region: 'JP', include_adult: 'false', page });
     }
-    return { movies: summaries(data), page: data.page || page, totalPages: Math.min(data.total_pages || 0, 500) };
+    else if (media === 'movie' && options.mode === 'now' && !options.provider) data = await request('movie/now_playing', credential, { region: 'JP', page });
+    else if (media === 'tv' && options.mode === 'tv-trending' && !options.provider) data = await request('trending/tv/week', credential, { page });
+    else {
+      const params = { include_adult: 'false', sort_by: 'popularity.desc', page };
+      if (media === 'movie') params.include_video = 'false';
+      if (media === 'tv' && options.mode === 'anime-now') {
+        const today = new Date(), past = new Date(Date.now() - 21 * 86400000);
+        const iso = d => d.toISOString().slice(0, 10);
+        Object.assign(params, { with_genres: '16', with_original_language: 'ja', 'air_date.gte': iso(past), 'air_date.lte': iso(today) });
+      }
+      else if (media === 'tv' && options.mode === 'anime') Object.assign(params, { with_genres: '16', with_original_language: 'ja' });
+      else if (media === 'tv' && options.mode === 'drama') params.without_genres = '16';
+      if (options.provider) Object.assign(params, { watch_region: 'JP', with_watch_providers: options.provider, with_watch_monetization_types: options.monetization || 'flatrate' });
+      data = await request(`discover/${media}`, credential, params);
+    }
+    return { movies: summaries(data, media), page: data.page || page, totalPages: Math.min(data.total_pages || 0, 500) };
   }
-  async function providers(credential) {
-    const data = await request('watch/providers/movie', credential, { watch_region: 'JP' });
+  async function providers(credential, mediaType = 'movie') {
+    const data = await request(`watch/providers/${mediaType === 'tv' ? 'tv' : 'movie'}`, credential, { watch_region: 'JP' });
     return (data.results || []).filter(p => Number.isInteger(p.provider_id) && typeof p.provider_name === 'string').sort((a, b) => (a.display_priorities?.JP ?? a.display_priority ?? 999) - (b.display_priorities?.JP ?? b.display_priority ?? 999)).map(p => ({ id: p.provider_id, name: p.provider_name }));
   }
-  function normalizeProviders(data, checkedAt) {
+  function normalizeProviders(data, checkedAt, mediaType = 'movie') {
     const jp = data.results?.JP;
     const groups = {};
     for (const key of ['flatrate', 'rent', 'buy', 'free', 'ads']) {
       groups[key] = [...new Set((jp?.[key] || []).map(p => text(p.provider_name)).filter(Boolean))];
     }
-    return { ...groups, checkedAt, region: 'JP', link: /^https:\/\/www\.themoviedb\.org\/movie\//.test(jp?.link || '') ? jp.link : '' };
+    const linkPattern = mediaType === 'tv' ? /^https:\/\/www\.themoviedb\.org\/tv\// : /^https:\/\/www\.themoviedb\.org\/movie\//;
+    return { ...groups, checkedAt, region: 'JP', link: linkPattern.test(jp?.link || '') ? jp.link : '' };
   }
-  async function details(id, credential, previous = null) {
+  async function details(id, credential, previous = null, mediaType = 'movie') {
     if (!Number.isInteger(id) || id < 1) throw new Error('作品IDが不正です。');
+    const media = mediaType === 'tv' ? 'tv' : 'movie';
     const [result, providers] = await Promise.allSettled([
-      request(`movie/${id}`, credential, { append_to_response: 'credits,release_dates' }),
-      request(`movie/${id}/watch/providers`, credential)
+      request(`${media}/${id}`, credential, { append_to_response: media === 'tv' ? 'credits' : 'credits,release_dates' }),
+      request(`${media}/${id}/watch/providers`, credential)
     ]);
     if (result.status !== 'fulfilled') throw result.reason;
     const data = result.value;
+    const now = Date.now();
+    const normalized = providers.status === 'fulfilled' ? normalizeProviders(providers.value, now, media) : previous?.providers || null;
+    if (media === 'tv') {
+      const runTimes = (data.episode_run_time || []).filter(t => Number.isFinite(t) && t > 0);
+      return {
+        source: 'TMDB', id, mediaType: 'tv', title: text(data.name), originalTitle: text(data.original_name),
+        releaseDate: date(data.first_air_date), japanTheatricalDate: '',
+        runtime: runTimes.length ? Math.round(runTimes.reduce((a, b) => a + b, 0) / runTimes.length) : null,
+        seasons: Number.isInteger(data.number_of_seasons) && data.number_of_seasons > 0 ? data.number_of_seasons : null,
+        episodes: Number.isInteger(data.number_of_episodes) && data.number_of_episodes > 0 ? data.number_of_episodes : null,
+        directors: (data.created_by || []).map(p => text(p.name)).filter(Boolean),
+        cast: (data.credits?.cast || []).slice(0, 12).map(p => ({ name: text(p.name), character: text(p.character) })),
+        genres: (data.genres || []).map(g => text(g.name)).filter(Boolean),
+        overview: text(data.overview), poster: image(data.poster_path), checkedAt: now,
+        providers: normalized,
+        providerError: providers.status === 'rejected'
+      };
+    }
     const jpDates = (data.release_dates?.results || []).find(r => r.iso_3166_1 === 'JP')?.release_dates || [];
     const theatricalDates = jpDates.filter(r => [2, 3].includes(r.type)).map(r => date(r.release_date)).filter(Boolean).sort();
-    const now = Date.now();
     return {
-      source: 'TMDB', id, title: text(data.title), originalTitle: text(data.original_title),
+      source: 'TMDB', id, mediaType: 'movie', title: text(data.title), originalTitle: text(data.original_title),
       releaseDate: date(data.release_date), japanTheatricalDate: theatricalDates[0] || '',
       runtime: Number.isFinite(data.runtime) && data.runtime > 0 ? data.runtime : null,
       directors: (data.credits?.crew || []).filter(p => p.job === 'Director').map(p => text(p.name)).filter(Boolean),
       cast: (data.credits?.cast || []).slice(0, 12).map(p => ({ name: text(p.name), character: text(p.character) })),
       genres: (data.genres || []).map(g => text(g.name)).filter(Boolean),
       overview: text(data.overview), poster: image(data.poster_path), checkedAt: now,
-      providers: providers.status === 'fulfilled' ? normalizeProviders(providers.value, now) : previous?.providers || null,
+      providers: normalized,
       providerError: providers.status === 'rejected'
     };
   }
-  return { request, search, browse, providers, details, normalizeProviders };
+  return { request, search, browse, providers, details, normalizeProviders, kindOf };
 })();
