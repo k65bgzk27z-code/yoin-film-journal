@@ -4,6 +4,7 @@ function validate(r) {
 }
 function clean(r) { const {_revision,...body}=r; return body; }
 export async function api(request, env) {
+  if(new URL(request.url).pathname.startsWith('/api/bot/'))return botApi(request,env);
   if(!request.headers.get('oai-authenticated-user-id'))return json({error:'同じChatGPTアカウントでログインしてください。'},401);
   if(new URL(request.url).pathname.startsWith('/api/tmdb'))return tmdb(request,env);
   if(!env.DB)return json({error:'保存先の準備が完了していません。'},503);
