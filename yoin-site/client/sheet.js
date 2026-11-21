@@ -6,11 +6,11 @@
   const CLOSERS = {
     'modal': 'cancel', 'film-detail': 'film-close', 'connection': 'connection-cancel', 'person-dialog': 'person-close',
     'rewatch-dialog': 'rw-cancel', 'list-pick': 'list-pick-close', 'list-edit': 'list-edit-cancel', 'list-add': 'list-add-close',
-    'trash-dialog': 'trash-close', 'backups-dialog': 'backups-close'
+    'trash-dialog': 'trash-close', 'backups-dialog': 'backups-close', 'record-detail': 'rd-close'
   };
   // Dialogs whose original close button sat at the very top: that row is replaced by the sticky header
   // and a close button is added at the bottom of the content.
-  const NEEDS_FOOT = new Set(['film-detail', 'person-dialog', 'trash-dialog', 'backups-dialog']);
+  const NEEDS_FOOT = new Set(['film-detail', 'person-dialog', 'trash-dialog', 'backups-dialog', 'record-detail']);
   const snapshots = new WeakMap();
   const snap = d => JSON.stringify([...d.querySelectorAll('input,select,textarea')].map(e => e.type === 'checkbox' || e.type === 'radio' ? e.checked : e.value)
     .concat([...d.querySelectorAll('#viewings-editor,#lookup-preview')].map(e => e.textContent)));
@@ -58,7 +58,7 @@
     d.addEventListener('touchstart', e => {
       if (e.touches.length !== 1) return;
       const onBar = bar.contains(e.target) && !e.target.closest('button');
-      const fromTop = d.scrollTop <= 0 && !e.target.closest('input,textarea,select,.lookup-results,.pick-options,.person-films');
+      const fromTop = d.scrollTop <= 0 && !e.target.closest('input,textarea,select,.lookup-results,.pick-options,.person-films,.star-input,.rd-chips');
       startY = onBar || fromTop ? e.touches[0].clientY : null; dy = 0;
     }, { passive: true });
     d.addEventListener('touchmove', e => {
