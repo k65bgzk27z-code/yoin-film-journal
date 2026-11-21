@@ -145,16 +145,32 @@ $('viewings-editor').onclick = event => {
 };
 const toggleService = () => { $('service-field').hidden = $('method').value !== 'streaming'; };
 $('method').onchange = toggleService;
+// Filmarks-style poster grid: one tile per record (poster, score under it, title). Tapping opens the detail sheet.
+const starsHTML = (v, cls = '') => `<span class="stars ${cls}" style="--v:${Math.max(0, Math.min(5, Number(v) || 0))}" aria-hidden="true"></span>`;
+const posterHue = title => { let h = 0; for (const c of String(title)) h = (h * 31 + c.codePointAt(0)) % 360; return h; };
+function posterPlaceholder(r, cls = 'tile-ph') {
+  const year = (r.movie?.releaseDate || '').slice(0, 4) || ((r.meta || '').match(/(19\d{2}|20\d{2})年/) || [])[1] || '';
+  return `<span class="${cls}" style="--h:${posterHue(r.title)}" aria-hidden="true"><span class="ph-title">${escape(Array.from(r.title).slice(0, 40).join(''))}</span>${year ? `<span class="ph-year">${escape(year)}</span>` : ''}</span>`;
+}
+function tileHTML(r, sortMode) {
+  const poster = safePoster(r.movie?.poster), count = viewingsOf(r).length;
+  const score = r.status === 'want' ? '<span class="tile-score want">観たい</span>' : r.rating ? `<span class="tile-score">${starsHTML(r.rating, 'sm')}<b>${r.rating.toFixed(1)}</b></span>` : '<span class="tile-score none">★ −</span>';
+  const sub = sortMode === 'date' && r.date ? `<span class="tile-sub">${escape(dateText(r.date))}</span>` : '';
+  return `<button type="button" class="tile" data-open="${escape(r.id)}" aria-label="${escape(r.title)}${r.status === 'want' ? '（観たい）' : r.rating ? `（★${r.rating.toFixed(1)}）` : ''}の詳細"><span class="tile-poster">${poster ? `<img src="${poster.replace('/w500/', '/w342/')}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : posterPlaceholder(r)}${count > 1 ? `<span class="tile-flag">${count}回</span>` : ''}${r.review ? '<span class="tile-memo" title="感想あり">✎</span>' : ''}${r.enrichment?.status === 'review' ? '<span class="tile-flag check">要確認</span>' : ''}</span>${score}<span class="tile-title">${escape(r.title)}</span>${sub}</button>`;
+}
+// 観た日の穴埋め中は、日付入力が使いやすい横長の行で表示する。
+function rowHTML(r) {
+  const poster = safePoster(r.movie?.poster);
+  return `<article class="tile-row"><button type="button" class="tile-row-head" data-open="${escape(r.id)}">${poster ? `<img src="${poster.replace('/w500/', '/w185/')}" alt="" loading="lazy" referrerpolicy="no-referrer">` : posterPlaceholder(r, 'tile-ph small')}<span><strong>${escape(r.title)}</strong><small>${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}${r.movie?.releaseDate ? ' · ' + escape(r.movie.releaseDate.slice(0, 4)) + '年' : ''}</small></span></button>${quickDateHTML(r)}</article>`;
+}
 function render() {
   if (typeof onLibraryChanged === 'function') onLibraryChanged();
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
   $('stats').innerHTML = `<span><b>${watched.length}</b>鑑賞済み</span><span><b>${records.length - watched.length}</b>観たい</span><span><b>${rated.length ? (rated.reduce((sum, r) => sum + r.rating, 0) / rated.length).toFixed(1) : '—'}</b>平均評価</span>`;
   const list = filteredRecords();
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
-  const cardHTML = r => {
-    const poster = safePoster(r.movie?.poster);
-    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(dateText(r.date))}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}${viewMeta(r)}</p>${r.review ? (r.spoiler ? `<details class="spoiler"><summary>ネタバレを含む感想 · タップで表示</summary><p class="review">${escape(r.review)}</p></details>` : `<p class="review">${escape(r.review)}</p>`) : ''}${viewingHistoryHTML(r)}${filter === 'nodate' && !r.date ? quickDateHTML(r) : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> ${r.status === 'watched' ? `<button data-rewatch="${escape(r.id)}">＋ 再鑑賞</button> ` : ''}<button data-addlist="${escape(r.id)}">リスト</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
-  };
+  const sortMode = $('sort').value;
+  const cardHTML = r => filter === 'nodate' && !r.date ? rowHTML(r) : tileHTML(r, sortMode);
   const selected = list.find(r => r.id === randomFilmId);
   if (!selected) randomFilmId = null;
   const featured = randomPickRequested ? `<section class="random-pick" aria-label="おまかせの1本"><p class="random-pick-label">おまかせで1本</p>${selected ? cardHTML(selected) : `<p>${list.length ? 'もう一度押して、今の条件から選んでみましょう。' : '対象の映画がありません。'}</p>`}${selected && list.length === 1 ? '<p>今の条件では、この1本だけです。</p>' : ''}</section>` : '';
@@ -289,6 +305,7 @@ $('grid').onclick = async event => {
     render();
     return;
   }
+  if (button.dataset.open) { if (typeof openRecordDetail === 'function') openRecordDetail(button.dataset.open); return; }
   if (!storageHealthy) return;
   if (button.dataset.edit) openRecord(records.find(r => r.id === button.dataset.edit));
   if (button.dataset.rewatch) openRewatch(records.find(r => r.id === button.dataset.rewatch));

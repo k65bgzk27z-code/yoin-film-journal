@@ -125,8 +125,9 @@ async function openFilm(id, mediaType = 'movie') {
     if (version !== detailVersion || !$('film-detail').open) return;
     selectedFilm = film;
     const poster = safePoster(film.poster);
-    $('film-content').innerHTML = `<div class="film-hero">${poster ? `<img src="${poster}" alt="${escape(film.title)}のポスター" referrerpolicy="no-referrer">` : ''}<div><h2>${escape(film.title)}</h2><p>${escape(film.originalTitle)}</p><p>${escape(kindLabel(film))}${film.genres.length ? ` · ${escape(film.genres.join(' / '))}` : ''}</p></div></div>${movieHTML(film)}`;
     const saved = records.find(r => r.movie?.id === id && (r.movie?.mediaType || 'movie') === mediaType);
+    $('film-content').innerHTML = typeof filmDetailHTML === 'function' ? filmDetailHTML(film, saved) : `<div class="film-hero">${poster ? `<img src="${poster}" alt="${escape(film.title)}のポスター" referrerpolicy="no-referrer">` : ''}<div><h2>${escape(film.title)}</h2><p>${escape(film.originalTitle)}</p><p>${escape(kindLabel(film))}${film.genres.length ? ` · ${escape(film.genres.join(' / '))}` : ''}</p></div></div>${movieHTML(film)}`;
+    if (typeof loadBackdrop === 'function') loadBackdrop(film, $('film-content'));
     $('film-want').textContent = saved ? (saved.status === 'want' ? '✓ 観たいに登録済み' : '✓ 鑑賞済み') : '＋ 観たい';
     $('film-want').disabled = Boolean(saved) || !storageHealthy;
     $('film-record').textContent = saved ? '自分の記録を編集' : '鑑賞を記録';
@@ -183,6 +184,7 @@ $('film-record').onclick = () => {
   if (!existing) { $('title').value = film.title; $('status').value = 'watched'; }
   draftMovie = film;
   $('lookup-preview').innerHTML = movieHTML(film);
+  if (typeof syncFormWidgets === 'function') syncFormWidgets();
   $('lookup-status').textContent = '作品情報を選択済みです。評価や感想を記録してください。';
 };
 switchTab('library');
