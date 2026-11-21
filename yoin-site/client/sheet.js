@@ -31,6 +31,13 @@
     const scope = d.querySelector(':scope > form') || d;
     const h2 = scope.querySelector(':scope > h2');
     if (h2) { h2.removeAttribute('style'); bar.querySelector('.sheet-title').append(h2); }
+    if (d.id === 'modal') {
+      const save = document.getElementById('record-save-top');
+      const status = document.getElementById('record-save-status');
+      bar.querySelector('.sheet-x').before(save);
+      save.hidden = false;
+      bar.append(status);
+    }
     d.prepend(bar);
     // Detail views (film, person) have their heading inside loaded content: mirror it into the header
     // once it scrolls out of view, so you always know what you are looking at.

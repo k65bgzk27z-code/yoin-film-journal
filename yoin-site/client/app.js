@@ -66,7 +66,7 @@ async function api(path,options={}){const response=await fetch('/api/'+path,{...
 function editing(enabled){ready=enabled;storageHealthy=enabled;for(const id of ['add','import','export'])$(id).disabled=!enabled;}
 async function refresh(){const data=await api('records');records=validateRecords(data.records);render();}
 async function initialize(){editing(false);$('notice').textContent='記録を読み込んでいます…';try{if(oldLocal.length){await api('import',{method:'POST',body:JSON.stringify({records:oldLocal})});try{localStorage.setItem('yoin-cloud-imported-v1','true');}catch{}}await refresh();editing(true);$('notice').textContent='最新の記録を読み込みました。変更は自動で同期されます。';}catch(e){$('notice').textContent=e.message+' 保存済みデータは変更していません。';}}
-async function persist(next){if(!ready)return false;editing(false);let wrote=false;try{
+async function persist(next, showError = message => alert(message)){if(!ready)return false;editing(false);let wrote=false;try{
  const old=new Map(records.map(r=>[r.id,r])),ids=new Set(next.map(r=>r.id));
  const additions=next.filter(r=>!old.has(r.id));if(additions.length){
    const result = await api('import',{method:'POST',body:JSON.stringify({records:additions})});
@@ -88,7 +88,7 @@ async function persist(next){if(!ready)return false;editing(false);let wrote=fal
    $('notice').textContent='保存済み。通信が戻ったら再読み込みしてください。';
  }
  return true;
- }catch(e){$('notice').textContent=e.message;if(wrote){try{await refresh();}catch{}}alert(e.message);return false;}finally{editing(true);}}
+ }catch(e){$('notice').textContent=e.message;if(wrote){try{await refresh();}catch{}}showError(e.message);return false;}finally{editing(true);}}
 async function quickWatch(film, existing) {
   if (!storageHealthy || existing?.status === 'watched') return false;
   const knownMovie = existing?.movie || film;
@@ -98,6 +98,11 @@ async function quickWatch(film, existing) {
     ...existing, movie: knownMovie, status: 'watched', date: tokyoToday(), updated: Date.now()
   };
   return persist([...records.filter(r => r.id !== record.id), record]);
+}
+function setRecordSaveStatus(message) {
+  const status = $('record-save-status');
+  status.textContent = message;
+  status.hidden = !message;
 }
 function reviewDrafts() {
   try { return JSON.parse(localStorage.getItem(reviewDraftKey)) || {}; }
@@ -116,7 +121,7 @@ $('review').addEventListener('input', () => {
   const saved = storeReviewDraft($('recordId').value || 'new', {
     text: $('review').value, spoiler: $('spoiler').checked, title: $('title').value
   });
-  $('record-save-status').textContent = saved ? '未送信 · この端末に感想の下書きを保存しました' : '未送信 · 感想を開いたまま保存してください';
+  setRecordSaveStatus(saved ? '未送信 · この端末に感想の下書きを保存しました' : '未送信 · 感想を開いたまま保存してください');
 });
 $('spoiler').addEventListener('change', () => $('review').dispatchEvent(new Event('input')));
 $('restore-review').onclick = () => {
@@ -126,7 +131,7 @@ $('restore-review').onclick = () => {
   $('review').value = draft.text;
   $('spoiler').checked = draft.spoiler;
   $('restore-review').hidden = true;
-  $('record-save-status').textContent = '下書きを復元しました。内容を確認して保存してください。';
+  setRecordSaveStatus('下書きを復元しました。内容を確認して保存してください。');
 };
 function providerHTML(movie) {
   const providers = movie.providers;
@@ -266,7 +271,7 @@ function openRecord(record) {
   $('lookup-preview').innerHTML = movieHTML(draftMovie);
   $('lookup').disabled = false;
   $('restore-review').hidden = !reviewDrafts()[record?.id || 'new'];
-  $('record-save-status').textContent = '';
+  setRecordSaveStatus('');
   $('modal').showModal();
 }
 function showConnection() {
@@ -362,13 +367,17 @@ $('form').onsubmit = async event => {
   const draftId = $('recordId').value || 'new';
   const submittedReview = $('review').value;
   const submittedSpoiler = $('spoiler').checked;
-  $('record-save-status').textContent = '同期中…';
-  if (await persist([...records.filter(r => r.id !== record.id), record])) {
+  const buttons = [$('record-save-top'), $('record-save-bottom')];
+  buttons.forEach(button => { button.disabled = true; });
+  setRecordSaveStatus('本番に保存中…');
+  const didSave = await persist([...records.filter(r => r.id !== record.id), record], message => {
+    setRecordSaveStatus(`未保存 · ${message}`);
+  });
+  buttons.forEach(button => { button.disabled = false; });
+  if (didSave) {
     const draft = reviewDrafts()[draftId];
     if (draft?.text === submittedReview && draft.spoiler === submittedSpoiler) storeReviewDraft(draftId, null);
     $('modal').close();
-  } else {
-    $('record-save-status').textContent = '未送信 · もう一度「保存する」を押してください。';
   }
 };
 document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => {

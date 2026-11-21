@@ -1,6 +1,7 @@
 // Run: node build.mjs && node --test test/   — PWA files and the passphrase gate.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 const worker = (await import(new URL('../dist/server/index.js', import.meta.url))).default;
 const env = { DB: null, AUTH_SECRET: 'dummy-secret', AUTH_PASSPHRASE: 'dummy-pass' };
 const ORIGIN = 'https://yoin.test';
@@ -36,4 +37,17 @@ test('manifest and icons are public; app, sw.js and API stay behind the passphra
   const swText = await swAuthed.text();
   assert.match(swText, /request\.mode !== 'navigate'/);
   assert.doesNotMatch(swText, /cache\.put|caches\.open/);
+});
+
+test('old entry opens the shared production shelf and the record sheet has a direct save control', async () => {
+  const entry = await readFile(new URL('../../index.html', import.meta.url), 'utf8');
+  assert.match(entry, /href="https:\/\/yoin\.hayate-yoin\.workers\.dev\/"/);
+  assert.doesNotMatch(entry, /chatgpt\.site/);
+  const cookie = await login();
+  const headers = { Cookie: cookie };
+  const home = await (await worker.fetch(new Request(ORIGIN + '/', { headers }), env)).text();
+  assert.match(home, /<button[^>]*id="record-save-top"[^>]*type="submit"[^>]*form="form"/);
+  const sheet = await (await worker.fetch(new Request(ORIGIN + '/sheet.js', { headers }), env)).text();
+  assert.match(sheet, /before\(save\)/);
+  assert.match(sheet, /append\(status\)/);
 });
