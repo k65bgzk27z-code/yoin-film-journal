@@ -19,6 +19,13 @@ export function viewingError(v) {
 }
 // Optional record keys. Absent keys are always valid, so existing records are unaffected.
 export function extrasError(r) {
+  if ('progress' in r) {
+    const p = r.progress;
+    if (!p || !Number.isInteger(p.season) || p.season < 1 || p.season > 999 ||
+        !Number.isInteger(p.episode) || p.episode < 0 || p.episode > 9999) {
+      return 'シーズンまたは話数の形式が正しくありません。';
+    }
+  }
   if ('spoiler' in r && typeof r.spoiler !== 'boolean') return 'spoiler は true / false です。';
   if ('method' in r && (typeof r.method !== 'string' || (r.method !== '' && !VIEW_METHODS.includes(r.method)))) return 'method は ' + VIEW_METHODS.join(' / ') + ' か空文字です。';
   if ('service' in r && (typeof r.service !== 'string' || r.service.length > 100)) return 'service は100文字以内の文字列です。';

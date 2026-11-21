@@ -42,6 +42,12 @@ function scoreHTML(r) {
 function recordDetailHTML(r) {
   const m = r.movie, id = escape(r.id), views = viewingsOf(r);
   const write = r.status === 'want' ? `<button type="button" class="primary rd-write" data-mark-watched="${id}">✓ 観た！記録する</button>` : `<button type="button" class="primary rd-write" data-edit="${id}">${r.rating || r.review ? '✎ 評価・感想を編集' : '★ 評価・感想を書く'}</button>`;
+  const progress = m?.mediaType === 'tv' ? `<section class="rd-sec"><h3>視聴の進み具合</h3>
+    <form id="episode-form" data-record="${id}">
+      <label>シーズン <input id="progress-season" type="number" inputmode="numeric" min="1" max="999" required value="${escape(r.progress?.season || 1)}"></label>
+      <label>最後に観た話 <input id="progress-episode" type="number" inputmode="numeric" min="0" max="9999" required value="${escape(r.progress?.episode || 0)}"></label>
+      <div class="actions"><button type="submit">進捗を保存</button><button type="submit" name="next-episode">＋1話</button></div>
+    </form></section>` : '';
   const review = r.review ? (r.spoiler ? `<details class="spoiler"><summary>ネタバレを含む感想 · タップで表示</summary><p class="review">${escape(r.review)}</p></details>` : `<p class="review">${escape(r.review)}</p>`) : `<p class="rd-empty">まだ感想はありません。</p>`;
   const facts = [];
   if (r.status === 'watched') facts.push(['観た日', r.date ? escape(dateText(r.date)) : '<span class="muted">未入力</span>']);
@@ -54,6 +60,7 @@ function recordDetailHTML(r) {
   ${r.enrichment?.status === 'review' ? '<p class="review-needed">作品の確認が必要 · 自動では紐づけていません。「作品情報を探す」から選べます。</p>' : ''}
   ${peopleHTML(m)}
   <section class="rd-sec rd-mine"><h3>私の感想</h3>${review}${facts.length ? `<dl class="rd-facts-list">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>` : ''}${r.status === 'watched' && !r.date ? quickDateHTML(r) : ''}</section>
+  ${progress}
   ${history}
   ${aboutHTML(m)}
   <div class="rd-more"><button type="button" data-info="${id}">${m ? '作品情報を更新' : '作品情報を探す'}</button><button type="button" data-addlist="${id}">リストに追加</button><button type="button" class="danger" data-delete="${id}">ゴミ箱へ移動</button></div>`;
@@ -102,24 +109,33 @@ function filmDetailHTML(film, saved) {
   const score = saved ? `<div class="rd-score-row">${scoreHTML(saved)}<button type="button" class="rd-open-record" data-open-record="${escape(saved.id)}">自分の記録を見る</button></div>` : '';
   return `${heroHTML(film, saved, film.title)}${score}${peopleHTML(film)}${aboutHTML(film)}`;
 }
-function markWatched(r) {
-  openRecord(r);
-  if (!$('modal').open) return;
-  $('status').value = 'watched';
-  if (!$('date').value && !$('date-partial').checked) $('date').value = tokyoToday();
-  syncFormWidgets();
-}
 async function onDetailClick(event) {
   const b = event.target.closest('button');
   if (!b) return;
   if (b.dataset.moreOverview) { const p = b.previousElementSibling; p.classList.toggle('clamp'); b.textContent = p.classList.contains('clamp') ? '続きを読む' : '閉じる'; return; }
-  if (b.dataset.markWatched) { const r = records.find(x => x.id === b.dataset.markWatched); if (r && storageHealthy) markWatched(r); return; }
+  if (b.dataset.markWatched) { const r = records.find(x => x.id === b.dataset.markWatched); if (r && storageHealthy) {
+    $('rd-status').textContent = '同期中…';
+    $('rd-status').textContent = await quickWatch(r.movie, r) ? '今日の鑑賞を保存しました。' : '未同期 · もう一度お試しください。';
+  } return; }
   if (b.dataset.openRecord) { $('film-detail').close(); openRecordDetail(b.dataset.openRecord); return; }
   if (b.dataset.edit || b.dataset.rewatch || b.dataset.addlist || b.dataset.delete || b.dataset.info) {
     if (!storageHealthy) { $('rd-status').textContent = '読み込み中です。少し待ってからもう一度お試しください。'; return; }
     await $('grid').onclick({ target: b });
   }
 }
+$('record-detail').addEventListener('submit', async event => {
+  if (event.target.id !== 'episode-form') return;
+  event.preventDefault();
+  if (!storageHealthy) return;
+  const record = records.find(r => r.id === event.target.dataset.record);
+  if (!record) return;
+  const season = $('progress-season').valueAsNumber;
+  const episode = $('progress-episode').valueAsNumber + (event.submitter?.name === 'next-episode' ? 1 : 0);
+  if (episode > 9999) return;
+  $('rd-status').textContent = '同期中…';
+  const saved = await persist(records.map(r => r.id === record.id ? { ...r, progress: { season, episode }, updated: Date.now() } : r));
+  $('rd-status').textContent = saved ? '視聴の進み具合を保存しました。' : '未同期 · もう一度お試しください。';
+});
 $('record-detail').addEventListener('click', onDetailClick);
 $('film-content').addEventListener('click', onDetailClick);
 $('rd-close').onclick = () => { rdId = null; $('record-detail').close(); };

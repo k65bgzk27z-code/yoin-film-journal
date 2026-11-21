@@ -1,7 +1,8 @@
 'use strict';
 const $ = id => document.getElementById(id);
+const reviewDraftKey = 'yoin-review-drafts-v1';
 const key = 'yoin-films-v1', credentialKey = 'yoin-tmdb-key';
-let ready=false,oldLocal=[];
+let ready=false,oldLocal=[], newRecordId = '';
 let randomFilmId = null, randomPickRequested = false;
 let records = [], filter = 'all', storageHealthy = false, credential = '', draftMovie = null, lookupVersion = 0;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -67,11 +68,66 @@ async function refresh(){const data=await api('records');records=validateRecords
 async function initialize(){editing(false);$('notice').textContent='記録を読み込んでいます…';try{if(oldLocal.length){await api('import',{method:'POST',body:JSON.stringify({records:oldLocal})});try{localStorage.setItem('yoin-cloud-imported-v1','true');}catch{}}await refresh();editing(true);$('notice').textContent='最新の記録を読み込みました。変更は自動で同期されます。';}catch(e){$('notice').textContent=e.message+' 保存済みデータは変更していません。';}}
 async function persist(next){if(!ready)return false;editing(false);let wrote=false;try{
  const old=new Map(records.map(r=>[r.id,r])),ids=new Set(next.map(r=>r.id));
- const additions=next.filter(r=>!old.has(r.id));if(additions.length){await api('import',{method:'POST',body:JSON.stringify({records:additions})});wrote=true;}
+ const additions=next.filter(r=>!old.has(r.id));if(additions.length){
+   const result = await api('import',{method:'POST',body:JSON.stringify({records:additions})});
+   wrote = true;
+   if (result.added !== additions.length) throw Error('同じ記録が保存済みです。最新の記録を確認してください。');
+ }
  for(const r of next){const before=old.get(r.id);if(before&&JSON.stringify(before)!==JSON.stringify(r)){await api('records/'+encodeURIComponent(r.id),{method:'PUT',body:JSON.stringify(r)});wrote=true;}}
  for(const r of records){if(!ids.has(r.id)){await api('records/'+encodeURIComponent(r.id),{method:'DELETE',body:JSON.stringify({_revision:r._revision})});wrote=true;}}
- await refresh();$('notice').textContent='保存して同期しました。';return true;
+ try {
+   await refresh();
+   $('notice').textContent='保存して同期しました。';
+ } catch {
+   records = next.map(r => {
+     const before = old.get(r.id);
+     if (!before) return { ...r, _revision: 1 };
+     return JSON.stringify(before) === JSON.stringify(r) ? r : { ...r, _revision: before._revision + 1 };
+   });
+   render();
+   $('notice').textContent='保存済み。通信が戻ったら再読み込みしてください。';
+ }
+ return true;
  }catch(e){$('notice').textContent=e.message;if(wrote){try{await refresh();}catch{}}alert(e.message);return false;}finally{editing(true);}}
+async function quickWatch(film, existing) {
+  if (!storageHealthy || existing?.status === 'watched') return false;
+  const knownMovie = existing?.movie || film;
+  const record = {
+    id: existing?.id || `tmdb-${film.mediaType || 'movie'}-${film.id}`,
+    title: film?.title || existing.title, rating: 0, meta: '', review: '',
+    ...existing, movie: knownMovie, status: 'watched', date: tokyoToday(), updated: Date.now()
+  };
+  return persist([...records.filter(r => r.id !== record.id), record]);
+}
+function reviewDrafts() {
+  try { return JSON.parse(localStorage.getItem(reviewDraftKey)) || {}; }
+  catch { return {}; }
+}
+function storeReviewDraft(id, draft) {
+  try {
+    const drafts = reviewDrafts();
+    if (draft) drafts[id] = draft;
+    else delete drafts[id];
+    localStorage.setItem(reviewDraftKey, JSON.stringify(drafts));
+    return true;
+  } catch { return false; }
+}
+$('review').addEventListener('input', () => {
+  const saved = storeReviewDraft($('recordId').value || 'new', {
+    text: $('review').value, spoiler: $('spoiler').checked, title: $('title').value
+  });
+  $('record-save-status').textContent = saved ? '未送信 · この端末に感想の下書きを保存しました' : '未送信 · 感想を開いたまま保存してください';
+});
+$('spoiler').addEventListener('change', () => $('review').dispatchEvent(new Event('input')));
+$('restore-review').onclick = () => {
+  const draft = reviewDrafts()[$('recordId').value || 'new'];
+  if (!draft) return;
+  if (!$('recordId').value && !$('title').value) $('title').value = draft.title || '';
+  $('review').value = draft.text;
+  $('spoiler').checked = draft.spoiler;
+  $('restore-review').hidden = true;
+  $('record-save-status').textContent = '下書きを復元しました。内容を確認して保存してください。';
+};
 function providerHTML(movie) {
   const providers = movie.providers;
   let html = '<div class="providers"><b>日本で観る</b>';
@@ -113,6 +169,12 @@ randomResult.setAttribute('role', 'status');
 randomResult.setAttribute('aria-live', 'polite');
 $('grid').before(randomResult);
 randomButton.onclick = () => {
+  const select = $('shelf-provider');
+  const preferred = select.value;
+  const providers = [...new Set(records.filter(r => r.status === 'want').flatMap(r => r.movie?.providers?.flatrate || []))].sort((a, b) => a.localeCompare(b, 'ja'));
+  select.innerHTML = '<option value="">すべての配信先</option>' + providers.map(p => `<option>${escape(p)}</option>`).join('');
+  select.value = providers.includes(preferred) ? preferred : '';
+  select.parentElement.style.display = filter === 'want' ? 'grid' : 'none';
   const list = filteredRecords();
   const alternatives = list.filter(r => r.id !== randomFilmId);
   const candidates = alternatives.length ? alternatives : list;
@@ -121,7 +183,8 @@ randomButton.onclick = () => {
   render();
 };
 function filteredRecords() {
-  return records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : filter === 'nodate' ? r.status === 'watched' && !r.date : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
+  const provider = $('shelf-provider').value;
+  return records.filter(r => (!provider || filter !== 'want' || r.movie?.providers?.flatrate.includes(provider)) && (filter === 'all' || (filter === 'progress' ? r.movie?.mediaType === 'tv' && r.progress?.episode > 0 : filter === 'review' ? r.enrichment?.status === 'review' : filter === 'nodate' ? r.status === 'watched' && !r.date : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
 }
 function viewMeta(r) {
   const count = viewingsOf(r).length, method = methodLabel(r.method, r.service);
@@ -155,7 +218,9 @@ function posterPlaceholder(r, cls = 'tile-ph') {
 function tileHTML(r, sortMode) {
   const poster = safePoster(r.movie?.poster), count = viewingsOf(r).length;
   const score = r.status === 'want' ? '<span class="tile-score want">観たい</span>' : r.rating ? `<span class="tile-score">${starsHTML(r.rating, 'sm')}<b>${r.rating.toFixed(1)}</b></span>` : '<span class="tile-score none">★ −</span>';
-  const sub = sortMode === 'date' && r.date ? `<span class="tile-sub">${escape(dateText(r.date))}</span>` : '';
+  const sub = r.movie?.mediaType === 'tv' && r.progress?.episode > 0
+    ? `<span class="tile-sub">S${escape(r.progress.season)} · 第${escape(r.progress.episode)}話まで</span>`
+    : sortMode === 'date' && r.date ? `<span class="tile-sub">${escape(dateText(r.date))}</span>` : '';
   return `<button type="button" class="tile" data-open="${escape(r.id)}" aria-label="${escape(r.title)}${r.status === 'want' ? '（観たい）' : r.rating ? `（★${r.rating.toFixed(1)}）` : ''}の詳細"><span class="tile-poster">${poster ? `<img src="${poster.replace('/w500/', '/w342/')}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : posterPlaceholder(r)}${count > 1 ? `<span class="tile-flag">${count}回</span>` : ''}${r.review ? '<span class="tile-memo" title="感想あり">✎</span>' : ''}${r.enrichment?.status === 'review' ? '<span class="tile-flag check">要確認</span>' : ''}</span>${score}<span class="tile-title">${escape(r.title)}</span>${sub}</button>`;
 }
 // 観た日の穴埋め中は、日付入力が使いやすい横長の行で表示する。
@@ -167,6 +232,12 @@ function render() {
   if (typeof onLibraryChanged === 'function') onLibraryChanged();
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
   $('stats').innerHTML = `<span><b>${watched.length}</b>鑑賞済み</span><span><b>${records.length - watched.length}</b>観たい</span><span><b>${rated.length ? (rated.reduce((sum, r) => sum + r.rating, 0) / rated.length).toFixed(1) : '—'}</b>平均評価</span>`;
+  const select = $('shelf-provider');
+  const preferred = select.value;
+  const providers = [...new Set(records.filter(r => r.status === 'want').flatMap(r => r.movie?.providers?.flatrate || []))].sort((a, b) => a.localeCompare(b, 'ja'));
+  select.innerHTML = '<option value="">すべての配信先</option>' + providers.map(p => `<option>${escape(p)}</option>`).join('');
+  select.value = providers.includes(preferred) ? preferred : '';
+  select.parentElement.style.display = filter === 'want' ? 'grid' : 'none';
   const list = filteredRecords();
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
   const sortMode = $('sort').value;
@@ -188,11 +259,14 @@ function openRecord(record) {
   renderViewingsEditor();
   toggleService();
   $('recordId').value = record?.id || '';
+  newRecordId = record ? '' : crypto.randomUUID();
   draftMovie = record?.movie || null;
   $('lookup-results').innerHTML = '';
   $('lookup-status').textContent = credential ? '作品名を入力して検索してください。' : '最初に「映画情報を接続」から無料接続を設定してください。';
   $('lookup-preview').innerHTML = movieHTML(draftMovie);
   $('lookup').disabled = false;
+  $('restore-review').hidden = !reviewDrafts()[record?.id || 'new'];
+  $('record-save-status').textContent = '';
   $('modal').showModal();
 }
 function showConnection() {
@@ -268,7 +342,7 @@ $('form').onsubmit = async event => {
   if (!title) { $('title').focus(); return; }
   const record = {
     ...records.find(r=>r.id===$('recordId').value),
-    id: $('recordId').value || crypto.randomUUID(), title, status: $('status').value,
+    id: $('recordId').value || newRecordId, title, status: $('status').value,
     rating: Number($('rating').value), date: formDate(), meta: $('meta').value.trim(),
     review: $('review').value.trim(), updated: Date.now(), ...(draftMovie ? { movie: draftMovie } : {}),
     method: $('method').value, service: $('method').value === 'streaming' ? $('service').value.trim() : '', spoiler: $('spoiler').checked
@@ -284,7 +358,18 @@ $('form').onsubmit = async event => {
   if (!saved?.method && !record.method) delete record.method;
   if (!saved?.service && !record.service) delete record.service;
   if (!saved?.spoiler && !record.spoiler) delete record.spoiler;
-  if (await persist([...records.filter(r => r.id !== record.id), record])) $('modal').close();
+  if (!storageHealthy) return;
+  const draftId = $('recordId').value || 'new';
+  const submittedReview = $('review').value;
+  const submittedSpoiler = $('spoiler').checked;
+  $('record-save-status').textContent = '同期中…';
+  if (await persist([...records.filter(r => r.id !== record.id), record])) {
+    const draft = reviewDrafts()[draftId];
+    if (draft?.text === submittedReview && draft.spoiler === submittedSpoiler) storeReviewDraft(draftId, null);
+    $('modal').close();
+  } else {
+    $('record-save-status').textContent = '未送信 · もう一度「保存する」を押してください。';
+  }
 };
 document.querySelectorAll('[data-filter]').forEach(button => button.onclick = () => {
   filter = button.dataset.filter;
@@ -292,6 +377,7 @@ document.querySelectorAll('[data-filter]').forEach(button => button.onclick = ()
   render();
 });
 $('search').oninput = render;
+$('shelf-provider').onchange = render;
 $('sort').onchange = render;
 $('random-pick-result').onclick = event => $('grid').onclick(event);
 $('grid').onclick = async event => {
@@ -299,6 +385,7 @@ $('grid').onclick = async event => {
   if (!button) return;
   if (button.dataset.clearFilters) {
     $('search').value = '';
+    $('shelf-provider').value = '';
     if (filter === 'review') $('review-filter').textContent = '作品の確認が必要な記録';
     filter = 'all';
     document.querySelectorAll('[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
@@ -359,7 +446,7 @@ window.addEventListener('focus',()=>{if(ready&&!document.querySelector('dialog[o
 function findFilmRecord(film){
  const exact=records.find(r=>r.movie?.id===film.id&&(r.movie?.mediaType||'movie')===(film.mediaType||'movie'));if(exact)return exact;
  const normalized=s=>s.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
- const candidates=records.filter(r=>normalized(r.title)===normalized(film.title));
+ const candidates=records.filter(r=>!r.movie&&normalized(r.title)===normalized(film.title));
  const year=(film.releaseDate||'').slice(0,4);
  const compatible=candidates.filter(r=>{const known=(r.meta||'').match(/(19\d{2}|20\d{2})年製作/);return !known||!year||known[1]===year;});
  return compatible.find(r=>r.status==='watched')||compatible[0];

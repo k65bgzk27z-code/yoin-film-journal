@@ -162,3 +162,18 @@ test('tmdb proxy allows person lookups only for logged-in owner', async () => {
   assert.equal((await call(env, '/api/tmdb/person/7')).status, 401);
   assert.equal((await call(env, '/api/tmdb/person/abc', { headers: c })).status, 404);
 });
+
+test('Safari session can update episode progress without a bot token', async () => {
+  const env = await makeEnv();
+  delete env.BOT_API_TOKEN;
+  const firstDevice = await cookie(env), secondDevice = await cookie(env);
+  const record = rec('series', { status: 'watched', rating: 4.5, review: '残しておきたい感想' });
+  await seed(env, [record]);
+  const progress = { season: 2, episode: 4 };
+  const write = body => call(env, '/api/records/series', { method: 'PUT', headers: firstDevice, body });
+  assert.equal((await write({ ...record, progress: { season: 0, episode: 4 }, _revision: 1 })).status, 400);
+  assert.equal((await write({ ...record, progress, _revision: 1 })).status, 200);
+  const read = await call(env, '/api/records', { headers: secondDevice });
+  assert.deepEqual((await read.json()).records, [{ ...record, progress, _revision: 2 }]);
+  assert.equal((await write({ ...record, progress: { season: 1, episode: 1 }, _revision: 1 })).status, 409);
+});

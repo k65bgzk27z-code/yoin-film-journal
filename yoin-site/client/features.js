@@ -148,6 +148,25 @@ function hchart(entries, extra = () => '') {
   const max = Math.max(1, ...entries.map(e => e[1]));
   return entries.length ? `<div class="hchart">${entries.map((e, i) => `<div class="hbar"><span class="hbar-label">${e[2] || escape(e[0])}</span><span class="hbar-track"><span style="width:${(e[1] / max * 100).toFixed(1)}%"></span></span><span class="hbar-val">${e[1]}${extra(e, i)}</span></div>`).join('')}</div>` : '<p class="lookup-note">作品情報が紐づいた記録がまだありません。</p>';
 }
+let recapMonth = '';
+function renderRecap(watched, monthly) {
+  const today = tokyoToday();
+  const lastYear = `${Number(today.slice(0, 4)) - 1}${today.slice(4, 7)}`;
+  const options = [...new Set([lastYear, ...monthly.map(v => v.date.slice(0, 7))])].sort().reverse();
+  if (!options.includes(recapMonth)) recapMonth = lastYear;
+  const monthViews = monthly.filter(v => v.date.startsWith(recapMonth));
+  const titles = [...new Map(monthViews.sort((a, b) => b.date.localeCompare(a.date)).map(v => [v.record.id, v.record])).values()];
+  const favorites = watched.filter(r => r.rating >= 4).sort((a, b) => b.rating - a.rating || b.updated - a.updated);
+  const rows = list => list.length ? `<ul>${list.map(r => `<li><button type="button" data-recap-record="${escape(r.id)}">${escape(r.title)}</button>${r.rating ? ` ★${r.rating.toFixed(1)}` : ''}${r.review ? ' · 感想あり' : ''}</li>`).join('')}</ul>` : '<p>該当する記録はありません。</p>';
+  return `<section class="stat-block"><h3>鑑賞を振り返る</h3>
+    <label>鑑賞月 <select id="recap-month">${options.map(m => `<option value="${m}"${m === recapMonth ? ' selected' : ''}>${dateText(m)}</option>`).join('')}</select></label>
+    <p>${titles.length}作品 · ${monthViews.length}回の鑑賞</p>${rows(titles)}
+    <details><summary>★4以上の作品（${favorites.length}件）</summary>${rows(favorites)}</details></section>`;
+}
+$('stats-content').addEventListener('click', event => {
+  const button = event.target.closest('[data-recap-record]');
+  if (button) openRecordDetail(button.dataset.recapRecord);
+});
 function renderStats() {
   if ($('stats-view').hidden) return;
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
@@ -169,13 +188,15 @@ function renderStats() {
   const unsetMethods = views.filter(v => !v.method).length;
   const rewatched = watched.filter(r => viewingsOf(r).length > 1).length;
   const thisYear = tokyoToday().slice(0, 4);
-  $('stats-content').innerHTML = `<div class="stats stat-cards"><span><b>${watched.length}</b>鑑賞作品</span><span><b>${views.length}</b>総鑑賞回数</span><span><b>${rated.length ? (rated.reduce((s, r) => s + r.rating, 0) / rated.length).toFixed(2) : '—'}</b>平均★</span><span><b>${dated.filter(v => v.date.startsWith(thisYear)).length}</b>${thisYear}年の鑑賞</span><span><b>${rewatched}</b>再鑑賞した作品</span><span><b>${records.length - watched.length}</b>観たい</span></div>
+  $('stats-content').innerHTML = `<div class="stats stat-cards"><span><b>${watched.length}</b>鑑賞作品</span><span><b>${views.length}</b>総鑑賞回数</span><span><b>${rated.length ? (rated.reduce((s, r) => s + r.rating, 0) / rated.length).toFixed(2) : '—'}</b>平均★</span><span><b>${dated.filter(v => v.date.startsWith(thisYear)).length}</b>${thisYear}年の鑑賞</span><span><b>${rewatched}</b>再鑑賞した作品</span><span><b>${records.filter(r => r.status === 'want').length}</b>観たい</span></div>
+  ${renderRecap(watched, monthly)}
   <section class="stat-block"><h3>年別の鑑賞回数</h3>${byYear.length ? vchart(byYear.slice(-15)) : ''}<p class="lookup-note">${dated.length ? `鑑賞日が入っている ${dated.length}回を集計しています。` : 'まだ鑑賞日が入っている記録がありません。'}${views.length - dated.length ? `鑑賞日なし ${views.length - dated.length}回（私の作品棚の「観た日が未入力」から年・月だけでも入れられます）。` : ''}</p></section>
   ${statsYear ? `<section class="stat-block"><h3>月別の鑑賞回数 <select id="stats-year" aria-label="年">${years.map(y => `<option ${y === statsYear ? 'selected' : ''}>${y}</option>`).join('')}</select></h3>${vchart(months)}${yearOnly ? `<p class="lookup-note">${statsYear}年のうち、月が未入力の ${yearOnly}回は月別に含みません。</p>` : ''}</section>` : ''}
   <section class="stat-block"><h3>★の分布 <small class="muted">評価済み ${rated.length}作品・未評価 ${watched.length - rated.length}作品</small></h3>${vchart(buckets.map(([l, n]) => [l, n]))}<p class="lookup-note">各棒は ★の値以上〜0.5未満（4.5は5.0を含む）。</p></section>
   <section class="stat-block"><h3>鑑賞方法</h3>${methodCounts.length ? hchart(methodCounts) : ''}<p class="lookup-note">${unsetMethods ? `鑑賞方法が未設定 ${unsetMethods}回。` : ''}記録の編集画面や再鑑賞で「劇場・配信・TV・DVD/BD」を選べます。</p></section>
   <div class="stat-two"><section class="stat-block"><h3>よく観るジャンル</h3>${hchart(genres, e => avg(e[3]))}</section><section class="stat-block"><h3>よく観る監督・制作</h3>${hchart(directors, e => avg(e[3]))}<p class="lookup-note">名前をタップすると作品一覧を開きます。</p></section></div>
   <section class="stat-block"><h3>よく観る俳優 <small class="muted">各作品の主要キャスト5名から</small></h3>${hchart(cast, e => avg(e[3]))}</section>`;
+  $('recap-month').onchange = event => { recapMonth = event.target.value; renderStats(); };
   const sel = $('stats-year');
   if (sel) sel.onchange = () => { statsYear = sel.value; renderStats(); };
 }

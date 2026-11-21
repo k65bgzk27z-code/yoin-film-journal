@@ -125,12 +125,12 @@ async function openFilm(id, mediaType = 'movie') {
     if (version !== detailVersion || !$('film-detail').open) return;
     selectedFilm = film;
     const poster = safePoster(film.poster);
-    const saved = records.find(r => r.movie?.id === id && (r.movie?.mediaType || 'movie') === mediaType);
+    const saved = findFilmRecord(film);
     $('film-content').innerHTML = typeof filmDetailHTML === 'function' ? filmDetailHTML(film, saved) : `<div class="film-hero">${poster ? `<img src="${poster}" alt="${escape(film.title)}のポスター" referrerpolicy="no-referrer">` : ''}<div><h2>${escape(film.title)}</h2><p>${escape(film.originalTitle)}</p><p>${escape(kindLabel(film))}${film.genres.length ? ` · ${escape(film.genres.join(' / '))}` : ''}</p></div></div>${movieHTML(film)}`;
     if (typeof loadBackdrop === 'function') loadBackdrop(film, $('film-content'));
     $('film-want').textContent = saved ? (saved.status === 'want' ? '✓ 観たいに登録済み' : '✓ 鑑賞済み') : '＋ 観たい';
     $('film-want').disabled = Boolean(saved) || !storageHealthy;
-    $('film-record').textContent = saved ? '自分の記録を編集' : '鑑賞を記録';
+    $('film-record').textContent = saved?.status === 'watched' ? '自分の記録を開く' : '今日観た・保存';
     $('film-record').disabled = !storageHealthy;
     $('film-status').textContent = saved ? 'この作品は映画棚に登録済みです。' : '気になったら「観たい」に追加できます。';
   } catch (error) { if (version === detailVersion) $('film-status').textContent = error.message; }
@@ -167,24 +167,33 @@ $('film-close').onclick = () => { detailVersion++; $('film-detail').close(); };
 $('film-detail').addEventListener('close', () => detailVersion++);
 $('film-want').onclick = async () => {
   if (!selectedFilm || findFilmRecord(selectedFilm)) return;
-  const record = { id: crypto.randomUUID(), title: selectedFilm.title, status: 'want', rating: 0, date: '', meta: '', review: '', updated: Date.now(), movie: selectedFilm };
+  const record = { id: `tmdb-${selectedFilm.mediaType || 'movie'}-${selectedFilm.id}`, title: selectedFilm.title, status: 'want', rating: 0, date: '', meta: '', review: '', updated: Date.now(), movie: selectedFilm };
   if (await persist([...records, record])) {
     $('film-want').textContent = '✓ 観たいに登録済み';
     $('film-want').disabled = true;
-    $('film-record').textContent = '自分の記録を編集';
+    $('film-record').textContent = '今日観た・保存';
     $('film-status').textContent = '「観たい」に保存しました。私の映画棚で確認できます。';
   }
 };
-$('film-record').onclick = () => {
-  if (!selectedFilm) return;
+$('film-record').onclick = async () => {
+  if (!selectedFilm || !storageHealthy) return;
   const film = selectedFilm;
   const existing = findFilmRecord(film);
+  const before = detailVersion;
+  if (existing?.status !== 'watched') {
+    $('film-status').textContent = '同期中…';
+    if (!await quickWatch(film, existing)) {
+      if (before === detailVersion) $('film-status').textContent = '未同期 · もう一度お試しください。';
+      return;
+    }
+  }
+  if (before !== detailVersion) return;
+  const saved = findFilmRecord(film);
+  if (saved?.status !== 'watched') {
+    $('film-status').textContent = '別の端末で登録されました。もう一度お試しください。';
+    return;
+  }
   $('film-detail').close();
-  openRecord(existing);
-  if (!existing) { $('title').value = film.title; $('status').value = 'watched'; }
-  draftMovie = film;
-  $('lookup-preview').innerHTML = movieHTML(film);
-  if (typeof syncFormWidgets === 'function') syncFormWidgets();
-  $('lookup-status').textContent = '作品情報を選択済みです。評価や感想を記録してください。';
+  openRecordDetail(saved.id);
 };
 switchTab('library');
