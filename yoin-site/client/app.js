@@ -22,6 +22,24 @@ function addViewing(r, v) {
   if (v.rating > 0) next.rating = v.rating;
   return next;
 }
+// Dates may be partial: YYYY / YYYY-MM / YYYY-MM-DD.
+const dateText = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') ? d.replaceAll('-', '/') : /^\d{4}-\d{2}$/.test(d || '') ? `${d.slice(0, 4)}年${Number(d.slice(5))}月` : /^\d{4}$/.test(d || '') ? `${d}年` : (d || '');
+function formDate() {
+  if (!$('date-partial').checked) return $('date').value;
+  const y = $('date-y').value.trim(), m = $('date-m').value;
+  if (!/^\d{4}$/.test(y)) return '';
+  return m ? `${y}-${String(m).padStart(2, '0')}` : y;
+}
+function setFormDate(value) {
+  const partial = /^\d{4}(-\d{2})?$/.test(value || '');
+  $('date-partial').checked = partial;
+  $('date').value = partial ? '' : (value || '');
+  $('date-y').value = partial ? value.slice(0, 4) : '';
+  $('date-m').value = partial && value.length === 7 ? String(Number(value.slice(5))) : '';
+  togglePartialDate();
+}
+function togglePartialDate() { const p = $('date-partial').checked; $('date').hidden = p; $('date-partial-fields').hidden = !p; }
+$('date-partial').onchange = togglePartialDate;
 const personButton = (name, role, movie) => `<button type="button" class="person-link" data-person="${escape(name)}" data-role="${role}" data-mid="${movie.id}" data-mmedia="${movie.mediaType === 'tv' ? 'tv' : 'movie'}">${escape(name)}</button>`;
 const checkedLabel = timestamp => Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString('ja-JP') : '未確認';
 function validateRecords(rows) {
@@ -103,7 +121,7 @@ randomButton.onclick = () => {
   render();
 };
 function filteredRecords() {
-  return records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
+  return records.filter(r => (filter === 'all' || (filter === 'review' ? r.enrichment?.status === 'review' : filter === 'nodate' ? r.status === 'watched' && !r.date : r.status === filter)) && [r.title, r.review, r.meta, r.movie?.originalTitle, ...(r.movie?.directors || [])].join(' ').toLowerCase().includes($('search').value.toLowerCase()));
 }
 function viewMeta(r) {
   const count = viewingsOf(r).length, method = methodLabel(r.method, r.service);
@@ -111,13 +129,13 @@ function viewMeta(r) {
 }
 function viewingHistoryHTML(r) {
   if (!Array.isArray(r.viewings) || r.viewings.length < 2) return '';
-  return `<details class="viewings"><summary>鑑賞履歴（${r.viewings.length}回）</summary><ol>${[...r.viewings].reverse().map(v => `<li><b>${escape(v.date ? v.date.replaceAll('-', '/') : '日付なし')}</b> ${escape(methodLabel(v.method, v.service))}${v.rating ? ` <span class="rating">★ ${v.rating.toFixed(1)}</span>` : ''}${v.note ? `<br><small>${escape(v.note)}</small>` : ''}</li>`).join('')}</ol></details>`;
+  return `<details class="viewings"><summary>鑑賞履歴（${r.viewings.length}回）</summary><ol>${[...r.viewings].reverse().map(v => `<li><b>${escape(v.date ? dateText(v.date) : '日付なし')}</b> ${escape(methodLabel(v.method, v.service))}${v.rating ? ` <span class="rating">★ ${v.rating.toFixed(1)}</span>` : ''}${v.note ? `<br><small>${escape(v.note)}</small>` : ''}</li>`).join('')}</ol></details>`;
 }
 let draftViewings = null;
 function renderViewingsEditor() {
   const box = $('viewings-editor');
   if (!draftViewings || draftViewings.length < 2) { box.innerHTML = ''; return; }
-  box.innerHTML = `<div class="viewings-editor"><b>鑑賞履歴（${draftViewings.length}回）</b><p class="lookup-note">上の鑑賞日・鑑賞方法は最新の鑑賞に反映されます。</p><ol>${draftViewings.map((v, i) => `<li>${escape(v.date ? v.date.replaceAll('-', '/') : '日付なし')} ${escape(methodLabel(v.method, v.service))}${v.rating ? ' ★ ' + v.rating.toFixed(1) : ''}${i === draftViewings.length - 1 ? ' <small>（最新）</small>' : ` <button type="button" data-remove-viewing="${i}">削除</button>`}</li>`).join('')}</ol></div>`;
+  box.innerHTML = `<div class="viewings-editor"><b>鑑賞履歴（${draftViewings.length}回）</b><p class="lookup-note">上の鑑賞日・鑑賞方法は最新の鑑賞に反映されます。</p><ol>${draftViewings.map((v, i) => `<li>${escape(v.date ? dateText(v.date) : '日付なし')} ${escape(methodLabel(v.method, v.service))}${v.rating ? ' ★ ' + v.rating.toFixed(1) : ''}${i === draftViewings.length - 1 ? ' <small>（最新）</small>' : ` <button type="button" data-remove-viewing="${i}">削除</button>`}</li>`).join('')}</ol></div>`;
 }
 $('viewings-editor').onclick = event => {
   const b = event.target.closest('[data-remove-viewing]');
@@ -135,7 +153,7 @@ function render() {
   list.sort((a, b) => $('sort').value === 'rating' ? b.rating - a.rating : $('sort').value === 'date' ? (b.date || '').localeCompare(a.date || '') : b.updated - a.updated);
   const cardHTML = r => {
     const poster = safePoster(r.movie?.poster);
-    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(r.date)}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}${viewMeta(r)}</p>${r.review ? (r.spoiler ? `<details class="spoiler"><summary>ネタバレを含む感想 · タップで表示</summary><p class="review">${escape(r.review)}</p></details>` : `<p class="review">${escape(r.review)}</p>`) : ''}${viewingHistoryHTML(r)}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> ${r.status === 'watched' ? `<button data-rewatch="${escape(r.id)}">＋ 再鑑賞</button> ` : ''}<button data-addlist="${escape(r.id)}">リスト</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
+    return `<article class="card"><div class="cover ${poster ? 'poster' : ''}" aria-hidden="true">${poster ? `<img src="${poster}" alt="" loading="lazy" referrerpolicy="no-referrer">` : escape(Array.from(r.title).slice(0, 2).join(''))}</div><div class="body"><span class="badge">${r.movie ? escape(kindLabel(r.movie)) + ' · ' : ''}${r.status === 'want' ? 'WATCHLIST · 観たい' : 'WATCHED · 鑑賞済み'} ${escape(dateText(r.date))}</span><h3>${escape(r.title)}</h3><small>${escape(r.meta)}</small><p class="rating">${r.rating ? '★ ' + r.rating.toFixed(1) : '未評価'}${viewMeta(r)}</p>${r.review ? (r.spoiler ? `<details class="spoiler"><summary>ネタバレを含む感想 · タップで表示</summary><p class="review">${escape(r.review)}</p></details>` : `<p class="review">${escape(r.review)}</p>`) : ''}${viewingHistoryHTML(r)}${filter === 'nodate' && !r.date ? quickDateHTML(r) : ''}${r.enrichment?.status==='review'?'<p class="review-needed">作品の確認が必要 · 自動では紐づけていません</p>':''}${r.movie?`<details class="movie-details"><summary>作品情報・日本の配信先</summary>${movieHTML(r.movie)}</details>`:''}<button data-edit="${escape(r.id)}">編集</button> <button data-info="${escape(r.id)}">${r.movie ? '情報を更新' : '作品情報を探す'}</button> ${r.status === 'watched' ? `<button data-rewatch="${escape(r.id)}">＋ 再鑑賞</button> ` : ''}<button data-addlist="${escape(r.id)}">リスト</button> <button data-delete="${escape(r.id)}">削除</button></div></article>`;
   };
   const selected = list.find(r => r.id === randomFilmId);
   if (!selected) randomFilmId = null;
@@ -149,6 +167,7 @@ function openRecord(record) {
   $('form').reset();
   for (const k of ['title', 'status', 'rating', 'date', 'meta', 'review', 'method', 'service']) if (record) $(k).value = record[k] ?? '';
   $('spoiler').checked = Boolean(record?.spoiler);
+  setFormDate(record?.date || '');
   draftViewings = Array.isArray(record?.viewings) ? record.viewings.map(v => ({ ...v })) : null;
   renderViewingsEditor();
   toggleService();
@@ -234,7 +253,7 @@ $('form').onsubmit = async event => {
   const record = {
     ...records.find(r=>r.id===$('recordId').value),
     id: $('recordId').value || crypto.randomUUID(), title, status: $('status').value,
-    rating: Number($('rating').value), date: $('date').value, meta: $('meta').value.trim(),
+    rating: Number($('rating').value), date: formDate(), meta: $('meta').value.trim(),
     review: $('review').value.trim(), updated: Date.now(), ...(draftMovie ? { movie: draftMovie } : {}),
     method: $('method').value, service: $('method').value === 'streaming' ? $('service').value.trim() : '', spoiler: $('spoiler').checked
   };
@@ -274,7 +293,7 @@ $('grid').onclick = async event => {
   if (button.dataset.edit) openRecord(records.find(r => r.id === button.dataset.edit));
   if (button.dataset.rewatch) openRewatch(records.find(r => r.id === button.dataset.rewatch));
   if (button.dataset.addlist) openListPick(records.find(r => r.id === button.dataset.addlist));
-  if (button.dataset.delete && confirm('この映画の記録を削除しますか？')) await persist(records.filter(r => r.id !== button.dataset.delete));
+  if (button.dataset.delete && confirm('この記録をゴミ箱に移動しますか？（30日以内なら元に戻せます）')) if (await persist(records.filter(r => r.id !== button.dataset.delete))) $('notice').innerHTML = 'ゴミ箱に移動しました。 <button type="button" data-open-trash="1">ゴミ箱を開く</button>';
   if (button.dataset.info) {
     const record = records.find(r => r.id === button.dataset.info);
     if (!record.movie) { openRecord(record); searchMovies(); return; }

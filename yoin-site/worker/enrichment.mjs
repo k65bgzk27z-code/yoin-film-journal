@@ -22,7 +22,7 @@ export async function enrichBatch(request,env){
  if(request.method==='GET'){
   const {results}=await env.DB.prepare('SELECT f.id,f.body,s.body AS original FROM films f LEFT JOIN enrichment_snapshots s ON f.id=s.id').all();
   let linked=0,review=0,errors=0,posters=0,protectedMismatch=0,processed=0;
-  for(const row of results){const r=JSON.parse(row.body);if(r.enrichment){processed++;if(r.enrichment.status==='linked')linked++;else if(r.enrichment.status==='review')review++;else errors++;}if(r.movie?.poster)posters++;if(row.original&&JSON.stringify(protectedRecord(r))!==JSON.stringify(protectedRecord(JSON.parse(row.original))))protectedMismatch++;}
+  for(const row of results){const r=JSON.parse(row.body);if(r.enrichment){processed++;if(r.enrichment.status==='linked')linked++;else if(r.enrichment.status==='review')review++;else errors++;}if(r.movie?.poster)posters++;if(row.original){const o=JSON.parse(row.original),core=x=>JSON.stringify([x.title,x.status,x.rating,x.review,x.meta]);/* Only records the owner has not edited since the snapshot; enrichment never changes updated. */if(o.updated===r.updated&&core(r)!==core(o))protectedMismatch++;}}
   return json({total:results.length,processed,linked,review,errors,posters,protectedMismatch});
  }
  if(request.method!=='POST')return json({error:'利用できません。'},405);

@@ -3,12 +3,14 @@
 // Everything here is additive: existing records are never rewritten by the
 // notice checker — it only writes to the new lists / notices / watch_checks tables.
 export const VIEW_METHODS = ['theater', 'streaming', 'tv', 'disc', 'other'];
-const ftDateOk = v => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v);
+// Dates may be partial: YYYY, YYYY-MM or YYYY-MM-DD (or empty).
+export const PARTIAL_DATE = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
+const ftDateOk = v => v === '' || PARTIAL_DATE.test(v);
 const ftRatingOk = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 5 && Math.abs(v * 10 - Math.round(v * 10)) < 0.000001;
 export function viewingError(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return '鑑賞記録の形式が正しくありません。';
   if (typeof v.id !== 'string' || !v.id || v.id.length > 80) return '鑑賞記録のIDが不正です。';
-  if (typeof v.date !== 'string' || !ftDateOk(v.date)) return '鑑賞日は "YYYY-MM-DD" か空文字で指定してください。';
+  if (typeof v.date !== 'string' || !ftDateOk(v.date)) return '鑑賞日は "YYYY-MM-DD"・"YYYY-MM"・"YYYY" か空文字で指定してください。';
   if (typeof v.method !== 'string' || (v.method !== '' && !VIEW_METHODS.includes(v.method))) return '鑑賞方法は ' + VIEW_METHODS.join(' / ') + ' か空文字です。';
   if (typeof v.service !== 'string' || v.service.length > 100) return '配信サービス名は100文字以内の文字列です。';
   if (!ftRatingOk(v.rating)) return '鑑賞ごとの評価は 0〜5（小数第1位まで）です。';
@@ -179,12 +181,14 @@ export async function runNoticeCheck(env, limit = NOTICE_BATCH) {
   if (statements.length) { const r = await env.DB.batch(statements); created = noticeIdx.reduce((n, i) => n + (r[i]?.meta?.changes || 0), 0); }
   return { checked: outcomes.filter(Boolean).length, created };
 }
-export async function noticesList(env, { unreadOnly = false, limit = 100 } = {}) {
-  const lim = Math.min(200, Math.max(1, Number(limit) || 100));
-  const { results } = await env.DB.prepare(`SELECT id, body, created, read FROM notices ${unreadOnly ? 'WHERE read = 0 ' : ''}ORDER BY created DESC, id LIMIT ?`).bind(lim).all();
+const NOTICE_LABELS = { stream: '配信開始', digital: 'レンタル・購入開始', 'release-soon': 'もうすぐ公開', release: '公開日' };
+export async function noticesList(env, { unreadOnly = false, limit = 100, since = 0, origin = '' } = {}) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 100)), after = Number.isFinite(Number(since)) ? Number(since) : 0;
+  const { results } = await env.DB.prepare(`SELECT id, body, created, read FROM notices WHERE created > ? ${unreadOnly ? 'AND read = 0 ' : ''}ORDER BY created DESC, id LIMIT ?`).bind(after, lim).all();
   const unread = (await env.DB.prepare('SELECT count(*) AS c FROM notices WHERE read = 0').first()).c;
   const progress = await env.DB.prepare("SELECT (SELECT count(*) FROM films WHERE json_extract(body,'$.status') = 'want' AND json_extract(body,'$.movie.id') IS NOT NULL) AS watching, (SELECT count(*) FROM watch_checks w JOIN films f ON f.id = w.record_id WHERE json_extract(f.body,'$.status') = 'want') AS checked, (SELECT max(checked_at) FROM watch_checks) AS lastChecked").first();
-  return { unread, progress, notices: results.map(r => ({ ...JSON.parse(r.body), id: r.id, created: r.created, read: !!r.read })) };
+  const now = Date.now();
+  return { now, unread, progress, notices: results.map(r => { const n = JSON.parse(r.body), media = n.mediaType === 'tv' ? 'tv' : 'movie'; return { ...n, id: r.id, created: r.created, read: !!r.read, kindLabel: NOTICE_LABELS[n.kind] || 'お知らせ', tmdbUrl: Number.isInteger(n.tmdbId) ? `https://www.themoviedb.org/${media}/${n.tmdbId}` : '', watchUrl: Number.isInteger(n.tmdbId) ? `https://www.themoviedb.org/${media}/${n.tmdbId}/watch?locale=JP` : '', appUrl: origin ? origin + '/' : '' }; }) };
 }
 export async function noticesMarkRead(env, input) {
   if (input?.all === true) { const r = await env.DB.prepare('UPDATE notices SET read = 1 WHERE read = 0').run(); return [200, { marked: r.meta.changes }]; }
@@ -211,12 +215,12 @@ export async function featureApi(request, env, url) {
     if (method === 'DELETE') {
       const data = await body();
       if (!Number.isInteger(data?._revision)) return json({ error: '_revision を指定してください。' }, 409);
-      const r = await env.DB.prepare('DELETE FROM lists WHERE id = ? AND revision = ?').bind(id, data._revision).run();
-      return r.meta.changes === 1 ? json({ saved: true }) : json({ error: '別の端末で更新されています。開き直してください。' }, 409);
+      const ok = await softDelete(env, 'list', id, data._revision);
+      return ok ? json({ saved: true }) : json({ error: '別の端末で更新されています。開き直してください。' }, 409);
     }
     return json({ error: 'この操作は利用できません。' }, 405);
   }
-  if (path === '/api/notices' && method === 'GET') return json(await noticesList(env, { unreadOnly: url.searchParams.get('unread') === '1', limit: url.searchParams.get('limit') }));
+  if (path === '/api/notices' && method === 'GET') return json(await noticesList(env, { unreadOnly: url.searchParams.get('unread') === '1', limit: url.searchParams.get('limit'), since: url.searchParams.get('since') || 0, origin: url.origin }));
   if (path === '/api/notices/read' && method === 'POST') return send(await noticesMarkRead(env, await body()));
   if (path === '/api/notices/check' && method === 'POST') {
     const last = (await env.DB.prepare('SELECT max(checked_at) AS t FROM watch_checks').first())?.t || 0;
