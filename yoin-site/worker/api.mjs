@@ -13,7 +13,7 @@ export async function api(request, env) {
   try {
     if(url.pathname==='/api/enrich')return await enrichBatch(request,env);
     if(/^\/api\/(lists|notices)(\/|$)/.test(url.pathname))return await featureApi(request,env,url);
-    if(/^\/api\/(trash|backups)(\/|$)/.test(url.pathname))return await safetyApi(request,env,url);
+    if(/^\/api\/(trash|backups|settings)(\/|$)/.test(url.pathname))return await safetyApi(request,env,url);
     if(url.pathname==='/api/records' && request.method==='GET') {
       const {results}=await env.DB.prepare('SELECT body, revision FROM films ORDER BY id').all();
       return json({records:results.map(r=>({...JSON.parse(r.body),_revision:r.revision}))});

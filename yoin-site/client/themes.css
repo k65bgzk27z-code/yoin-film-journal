@@ -1,0 +1,117 @@
+/* 背景テーマ: シンプル（既定・テーマなし）／赤い幕（curtain）／スクリーンと客席（screen）。
+   html[data-bg] と html[data-dark] で切り替える。CSS とインラインSVGだけで描き、外部画像は使わない。
+   iOS Safari は background-attachment:fixed を無視するので、固定レイヤーは html/body の ::before・::after で描く。 */
+html[data-bg] body{position:relative;isolation:isolate;min-height:100dvh}
+html[data-bg] body::before,html[data-bg] body::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none}
+
+/* ---- 暗い背景の共通ルール（本文・ヘッダー・フッターだけ。ポップアップは明るいまま） ---- */
+html[data-dark] body{color:#ece6d6}
+html[data-dark] header{border-color:rgba(236,230,214,.12)}
+html[data-dark] header h1 span,html[data-dark] main .muted,html[data-dark] main small,html[data-dark] main footer,html[data-dark] #app-status,html[data-dark] main .lookup-note,html[data-dark] #enrich-status{color:#b2b5a9!important}
+html[data-dark] main button:not(.primary):not(.active),html[data-dark] header button{border-color:rgba(236,230,214,.26);color:#ece6d6}
+html[data-dark] .main-tabs{border-color:rgba(236,230,214,.14)}
+html[data-dark] #search,html[data-dark] #sort{background:rgba(255,255,255,.07);border-color:rgba(236,230,214,.24);color:#ece6d6;color-scheme:dark}
+html[data-dark] .install{background:rgba(255,255,255,.06)}
+html[data-dark] main footer a{color:#e0c48c}
+html[data-dark] #notice{color:#e0c48c}
+html[data-dark] .credit{border-color:rgba(236,230,214,.12)}
+html[data-dark] .section-heading h2,html[data-dark] .intro h2{color:#f3ecdb}
+html[data-dark] main .card,html[data-dark] main .enrich-tools,html[data-dark] main .catalog-film,html[data-dark] main .catalog-empty,html[data-dark] main .random-pick,html[data-dark] main .list-card,html[data-dark] main .list-items li,html[data-dark] main .stat-block,html[data-dark] main .notice-item,html[data-dark] main .empty{color:#272b29}
+html[data-dark] main .card{background:#f6f1e4;border-color:transparent;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+html[data-dark] main .enrich-tools,html[data-dark] main .empty{background:#ece7da;border-color:transparent}
+html[data-dark] main .card button:not(.primary):not(.active),html[data-dark] main .enrich-tools button:not(.primary):not(.active),html[data-dark] main .catalog-film button:not(.primary):not(.active),html[data-dark] main .catalog-empty button:not(.primary):not(.active),html[data-dark] main .random-pick button:not(.primary):not(.active),html[data-dark] main .list-card button:not(.primary):not(.active),html[data-dark] main .list-items li button:not(.primary):not(.active),html[data-dark] main .stat-block button:not(.primary):not(.active),html[data-dark] main .notice-item button:not(.primary):not(.active),html[data-dark] main .empty button:not(.primary):not(.active){color:#272b29;border-color:#cfd2c6}
+html[data-dark] main .card .muted,html[data-dark] main .enrich-tools .muted,html[data-dark] main .catalog-film .muted,html[data-dark] main .catalog-empty .muted,html[data-dark] main .random-pick .muted,html[data-dark] main .list-card .muted,html[data-dark] main .list-items li .muted,html[data-dark] main .stat-block .muted,html[data-dark] main .notice-item .muted,html[data-dark] main .empty .muted,html[data-dark] main .card small,html[data-dark] main .enrich-tools small,html[data-dark] main .catalog-film small,html[data-dark] main .catalog-empty small,html[data-dark] main .random-pick small,html[data-dark] main .list-card small,html[data-dark] main .list-items li small,html[data-dark] main .stat-block small,html[data-dark] main .notice-item small,html[data-dark] main .empty small,html[data-dark] main .card .lookup-note,html[data-dark] main .enrich-tools .lookup-note,html[data-dark] main .catalog-film .lookup-note,html[data-dark] main .catalog-empty .lookup-note,html[data-dark] main .random-pick .lookup-note,html[data-dark] main .list-card .lookup-note,html[data-dark] main .list-items li .lookup-note,html[data-dark] main .stat-block .lookup-note,html[data-dark] main .notice-item .lookup-note,html[data-dark] main .empty .lookup-note,html[data-dark] main .enrich-tools #enrich-status{color:#656a62!important}
+
+/* ---- ポップアップ: 枠とヘッダーをテーマ色に、中身は明るいまま ---- */
+html[data-dark] dialog::backdrop{background:rgba(6,5,5,.8)}
+html[data-dark] dialog.sheet{border-color:rgba(0,0,0,.55);box-shadow:0 24px 70px rgba(0,0,0,.65)}
+html[data-dark] .sheet-bar h2,html[data-dark] .sheet-title.mirror{color:#f5ecd8}
+html[data-dark] .sheet-x{color:#f5ecd8;border-color:rgba(245,236,216,.35);background:rgba(255,255,255,.04)}
+html[data-dark] .sheet-x:focus:not(:focus-visible){border-color:rgba(245,236,216,.35)}
+html[data-dark] .sheet-grip{background:rgba(245,236,216,.35)}
+html[data-bg="curtain"] .sheet-bar{background:linear-gradient(180deg,rgba(0,0,0,.25),transparent 60%),repeating-linear-gradient(90deg,#4a0910 0,#7d141b 9px,#9c2026 14px,#82161c 20px,#4a0910 28px);border-bottom:3px solid #c9a35c}
+html[data-bg="screen"] .sheet-bar{background:radial-gradient(60% 120% at 50% 0,rgba(225,232,255,.12),transparent),#121416;border-bottom:2px solid #d8b46a}
+
+/* ---- 背景の設定（フッター） ---- */
+.bg-setting{margin:18px 0 6px;display:grid;gap:8px}
+.bg-setting>b{font-size:13px;font-weight:600}
+.bg-options{display:flex;gap:8px;flex-wrap:wrap}
+.bg-options button{display:flex;align-items:center;gap:8px;margin:0;padding:6px 12px 6px 6px;font-size:13px;min-height:44px}
+.bg-options button[aria-pressed="true"]{outline:2px solid currentColor;outline-offset:1px;font-weight:600}
+.bg-swatch{width:44px;height:30px;border-radius:5px;flex:none;border:1px solid rgba(0,0,0,.25);overflow:hidden}
+.bg-swatch.simple{background:linear-gradient(#304d40,#304d40) 50% 70%/60% 5px no-repeat,linear-gradient(#fffefa,#fffefa) 50% 30%/60% 9px no-repeat,#f5f4ef}
+.bg-swatch.curtain{background:repeating-linear-gradient(90deg,#4a0910 0,#9c2026 2px,#4a0910 4px) left/9px 100% no-repeat,repeating-linear-gradient(90deg,#4a0910 0,#9c2026 2px,#4a0910 4px) right/9px 100% no-repeat,repeating-linear-gradient(90deg,#4a0910 0,#9c2026 2px,#4a0910 4px) top/100% 7px no-repeat,radial-gradient(60% 50% at 50% 10%,rgba(255,226,180,.35),transparent),#140f0f}
+.bg-swatch.screen{background:linear-gradient(rgba(240,243,255,.7),rgba(240,243,255,.7)) 50% 4px/70% 4px no-repeat,radial-gradient(2px 2px at 12% 85%,#ffcf7a,transparent) ,radial-gradient(2px 2px at 88% 85%,#ffcf7a,transparent),conic-gradient(from 346deg at 50% 115%,transparent 0deg,rgba(255,244,222,.22) 14deg,transparent 28deg),#0f1113}
+
+/* ===== 映画館テーマ: 共通 ===== */
+html[data-bg="curtain"],html[data-bg="screen"]{background:#0c0d0d}
+html[data-bg="curtain"]::before,html[data-bg="curtain"]::after,html[data-bg="screen"]::before,html[data-bg="screen"]::after{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none}
+/* 客席の背もたれのシルエット（画面下に固定）。2列、手前ほど大きく暗い。縁にスクリーンの光がうっすら当たる。 */
+html[data-bg="curtain"]::after,html[data-bg="screen"]::after{top:auto;height:calc(96px + env(safe-area-inset-bottom));background:
+  radial-gradient(17px 22px at 50% 100%,#040404 95%,transparent 100%) 0 100%/38px 30px repeat-x,
+  radial-gradient(17px 22px at 50% 100%,rgba(255,226,180,.26) 95%,transparent 100%) 0 calc(100% - 2px)/38px 30px repeat-x,
+  radial-gradient(13px 17px at 50% 100%,#070707 95%,transparent 100%) 19px calc(100% - 26px)/30px 22px repeat-x,
+  radial-gradient(13px 17px at 50% 100%,rgba(255,226,180,.2) 95%,transparent 100%) 19px calc(100% - 28px)/30px 22px repeat-x,
+  linear-gradient(180deg,transparent,rgba(255,220,170,.05) 40%,rgba(0,0,0,.5) 75%)}
+html[data-bg="curtain"] body::after,html[data-bg="screen"] body::after{opacity:.14;mix-blend-mode:screen;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+html[data-bg="curtain"] main,html[data-bg="screen"] main{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+
+/* ===== A: 赤い幕 ===== */
+/* 暗い客席＋上からのスクリーンの暖かい光 */
+html[data-bg="curtain"]::before{background:
+  radial-gradient(90% 38% at 50% 0%,rgba(255,232,196,.20),rgba(255,214,160,.06) 55%,transparent 75%),
+  radial-gradient(140% 100% at 50% 35%,transparent 50%,rgba(0,0,0,.65) 100%),
+  linear-gradient(180deg,#1e1414 0%,#130f0f 40%,#0b0a0a 100%)}
+/* 左右のビロードの幕（ひだはグラデーション）。画面の端だけにかかるので本文の邪魔をしない。 */
+html[data-bg="curtain"] body::before{--cw:clamp(16px,5.5vw,110px);background:
+  linear-gradient(90deg,rgba(0,0,0,.15),rgba(0,0,0,.05) 50%,rgba(0,0,0,.75)) left top/var(--cw) 100% no-repeat,
+  repeating-linear-gradient(90deg,#3d070c 0,#7e1219 5px,#b0242b 8px,#8a161d 11px,#3d070c 15px) left top/var(--cw) 100% no-repeat,
+  linear-gradient(270deg,rgba(0,0,0,.15),rgba(0,0,0,.05) 50%,rgba(0,0,0,.75)) right top/var(--cw) 100% no-repeat,
+  repeating-linear-gradient(270deg,#3d070c 0,#7e1219 5px,#b0242b 8px,#8a161d 11px,#3d070c 15px) right top/var(--cw) 100% no-repeat}
+/* 上の幕（バランス）: ページ最上部にかかり、下端は波形＋金の房飾り。スクロールすると一緒に上へ流れる。 */
+html[data-bg="curtain"] header{position:relative;border-bottom:0;padding-bottom:44px}
+html[data-bg="curtain"] header::before,html[data-bg="curtain"] header::after{content:"";position:absolute;left:0;right:0;top:0;z-index:-1;pointer-events:none}
+html[data-bg="curtain"] header::before{bottom:0;background:
+  linear-gradient(180deg,rgba(0,0,0,.35),rgba(0,0,0,0) 35%,rgba(0,0,0,.30) 100%),
+  repeating-linear-gradient(90deg,#4a0910 0,#8c161e 9px,#bf2d33 14px,#951a21 20px,#4a0910 28px);
+  -webkit-mask:radial-gradient(26px 20px at 50% 0,#000 97%,transparent 100%) 0 100%/52px 20px repeat-x,linear-gradient(#000,#000) top/100% calc(100% - 19px) no-repeat;
+  mask:radial-gradient(26px 20px at 50% 0,#000 97%,transparent 100%) 0 100%/52px 20px repeat-x,linear-gradient(#000,#000) top/100% calc(100% - 19px) no-repeat;
+  box-shadow:0 10px 30px rgba(0,0,0,.6)}
+html[data-bg="curtain"] header::after{top:auto;bottom:16px;height:5px;background:repeating-linear-gradient(90deg,#d8b46a 0 3px,#8f6b2c 3px 5px);opacity:.85;-webkit-mask:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
+html[data-bg="curtain"] h1{color:#f7ecd6;text-shadow:0 1px 0 rgba(0,0,0,.6),0 0 18px rgba(255,214,150,.25)}
+html[data-bg="curtain"] h1 span{color:#e9cfc4!important}
+html[data-bg="curtain"] header button{background:rgba(20,6,8,.45);border-color:rgba(247,236,214,.45)!important}
+html[data-bg="curtain"] main{padding-left:max(18px,calc(5.5vw + 8px));padding-right:max(18px,calc(5.5vw + 8px))}
+html[data-bg="curtain"] .eyebrow{color:#e0b878}
+html[data-bg="curtain"] button.primary,html[data-bg="curtain"] .toolbar .active,html[data-bg="curtain"] .main-tabs .active{background:#a8232a;border-color:#a8232a;color:#fff6e8}
+html[data-bg="curtain"] .rating{color:#a8232a}
+
+/* ===== B: スクリーンと客席 ===== */
+/* 上に光るスクリーン、後方の映写窓からの光の帯、帯の中に漂うほこり。 */
+html[data-bg="screen"]::before{background:
+  radial-gradient(70% 22% at 50% 0%,rgba(222,232,255,.22),rgba(222,232,255,.06) 60%,transparent 80%),
+  linear-gradient(180deg,#151a1d 0%,#0f1113 45%,#0a0a0b 100%)}
+html[data-bg="screen"] body::before{background:
+  linear-gradient(180deg,rgba(240,243,255,.42),rgba(240,243,255,.26)) 50% 8px/min(80vw,780px) 16px no-repeat,radial-gradient(50% 60% at 50% 0,rgba(225,232,255,.22),transparent 100%) 50% 0/min(100vw,980px) 110px no-repeat,
+  conic-gradient(from 346deg at 50% 115%,transparent 0deg,rgba(255,244,222,.05) 5deg,rgba(255,244,222,.13) 14deg,rgba(255,244,222,.05) 23deg,transparent 28deg),
+  radial-gradient(4px 4px at 7% calc(100% - 14px),#ffcf7a 40%,rgba(255,190,90,.35) 60%,transparent 100%),
+  radial-gradient(14px 10px at 7% calc(100% - 14px),rgba(255,190,90,.25),transparent),
+  radial-gradient(4px 4px at 93% calc(100% - 14px),#ffcf7a 40%,rgba(255,190,90,.35) 60%,transparent 100%),
+  radial-gradient(14px 10px at 93% calc(100% - 14px),rgba(255,190,90,.25),transparent),
+  radial-gradient(3px 3px at 7% calc(100% - 52px),#ffcf7a 40%,transparent 100%),
+  radial-gradient(3px 3px at 93% calc(100% - 52px),#ffcf7a 40%,transparent 100%)}
+/* ほこり: 小さな光点のタイルを光の帯の形で切り抜く */
+html[data-bg="screen"] body::after{opacity:1;mix-blend-mode:normal;background-image:
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='320'%3E%3Cg fill='%23fff3dc'%3E%3Ccircle cx='20' cy='30' r='1' opacity='.5'/%3E%3Ccircle cx='130' cy='60' r='.8' opacity='.35'/%3E%3Ccircle cx='200' cy='20' r='1.2' opacity='.4'/%3E%3Ccircle cx='80' cy='120' r='.7' opacity='.45'/%3E%3Ccircle cx='170' cy='150' r='1' opacity='.3'/%3E%3Ccircle cx='40' cy='200' r='1.3' opacity='.35'/%3E%3Ccircle cx='110' cy='240' r='.9' opacity='.5'/%3E%3Ccircle cx='220' cy='270' r='.8' opacity='.35'/%3E%3Ccircle cx='60' cy='300' r='1' opacity='.3'/%3E%3Ccircle cx='150' cy='300' r='.6' opacity='.45'/%3E%3C/g%3E%3C/svg%3E"),
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  -webkit-mask-image:conic-gradient(from 346deg at 50% 115%,transparent 0deg,#000 6deg,#000 22deg,transparent 28deg),linear-gradient(#0003,#0003);
+  mask-image:conic-gradient(from 346deg at 50% 115%,transparent 0deg,#000 6deg,#000 22deg,transparent 28deg),linear-gradient(#0003,#0003)}
+html[data-bg="screen"] header{border-color:rgba(236,230,214,.10);padding-top:44px}
+html[data-bg="screen"] h1{color:#f3e6c4;letter-spacing:2px;text-shadow:0 0 14px rgba(255,205,120,.35)}
+/* チケットの半券風の小見出し */
+html[data-bg="screen"] .eyebrow{display:inline-block;color:#1b170f;background:#d8b46a;padding:5px 16px 5px 18px;letter-spacing:3px;font-weight:600;
+  -webkit-mask:radial-gradient(6px at 0 50%,transparent 96%,#000) left/51% 100% no-repeat,radial-gradient(6px at 100% 50%,transparent 96%,#000) right/51% 100% no-repeat;
+  mask:radial-gradient(6px at 0 50%,transparent 96%,#000) left/51% 100% no-repeat,radial-gradient(6px at 100% 50%,transparent 96%,#000) right/51% 100% no-repeat;
+  background-image:linear-gradient(90deg,transparent calc(100% - 22px),rgba(0,0,0,.25) calc(100% - 22px),rgba(0,0,0,.25) calc(100% - 21px),transparent calc(100% - 21px))}
+html[data-bg="screen"] button.primary,html[data-bg="screen"] .toolbar .active,html[data-bg="screen"] .main-tabs .active{background:#d8b46a;border-color:#d8b46a;color:#1b170f}
+html[data-bg="screen"] h1 span{letter-spacing:0;text-shadow:none}
