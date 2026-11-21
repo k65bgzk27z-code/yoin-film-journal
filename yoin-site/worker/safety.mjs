@@ -74,6 +74,7 @@ export async function runMaintenance(env) {
   const backup = Date.now() - last >= BACKUP_EVERY ? await createBackup(env, 'auto') : null;
   return { purged, backup };
 }
+export const UI_BACKGROUNDS = ['simple', 'curtain', 'screen'];
 export async function safetyApi(request, env, url) {
   const path = url.pathname, method = request.method;
   const body = () => request.json().catch(() => null);
@@ -94,5 +95,16 @@ export async function safetyApi(request, env, url) {
   }
   const m = /^\/api\/backups\/([^/]+)\/download$/.exec(path);
   if (m && method === 'GET') return backupDownload(env, decodeURIComponent(m[1]));
+  if (path === '/api/settings/ui') {
+    // 表示の好みだけを保存する（app_settings の 'ui' 行のみ。他の行は読み書きしない）。
+    if (method === 'GET') { const row = await env.DB.prepare("SELECT body FROM app_settings WHERE name = 'ui'").first(); let data = {}; try { data = row ? JSON.parse(row.body) : {}; } catch {} return json({ background: UI_BACKGROUNDS.includes(data.background) ? data.background : null }); }
+    if (method === 'PUT') {
+      const d = await body();
+      if (!UI_BACKGROUNDS.includes(d?.background)) return json({ error: `background は ${UI_BACKGROUNDS.join(' / ')} のいずれかです。` }, 400);
+      await env.DB.prepare("INSERT INTO app_settings(name, body) VALUES('ui', ?) ON CONFLICT(name) DO UPDATE SET body = excluded.body").bind(JSON.stringify({ background: d.background, updated: Date.now() })).run();
+      return json({ background: d.background });
+    }
+    return json({ error: 'この操作は利用できません。' }, 405);
+  }
   return json({ error: '見つかりません。' }, 404);
 }

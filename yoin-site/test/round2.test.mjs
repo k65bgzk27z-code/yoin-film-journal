@@ -153,3 +153,18 @@ test('bot link + partial dates + enrichment safety check ignores date fill', asy
   s = await (await call(env, '/api/enrich', { headers: c })).json();
   assert.equal(s.protectedMismatch, 1, 'still catches untracked rating changes');
 });
+
+test('ui settings: background whitelist, persisted in app_settings ui row only', async () => {
+  const env = await makeEnv(), c = await cookie(env);
+  assert.equal((await call(env, '/api/settings/ui')).status, 401);
+  assert.deepEqual(await (await call(env, '/api/settings/ui', { headers: c })).json(), { background: null });
+  assert.equal((await call(env, '/api/settings/ui', { method: 'PUT', headers: c, body: { background: 'anten' } })).status, 400);
+  assert.equal((await call(env, '/api/settings/ui', { method: 'PUT', headers: c, body: { background: 'curtain' } })).status, 200);
+  assert.deepEqual(await (await call(env, '/api/settings/ui', { headers: c })).json(), { background: 'curtain' });
+  const tmdbBefore = env.DB.raw.prepare("SELECT body FROM app_settings WHERE name='tmdb'").get().body;
+  await call(env, '/api/settings/ui', { method: 'PUT', headers: c, body: { background: 'screen' } });
+  assert.equal(env.DB.raw.prepare("SELECT body FROM app_settings WHERE name='tmdb'").get().body, tmdbBefore);
+  assert.equal(JSON.parse(env.DB.raw.prepare("SELECT body FROM app_settings WHERE name='ui'").get().body).background, 'screen');
+  assert.equal((await call(env, '/api/settings/ui', { method: 'DELETE', headers: c, body: {} })).status, 405);
+  assert.equal((await call(env, '/api/bot/settings/ui', { headers: bearer })).status, 404);
+});
