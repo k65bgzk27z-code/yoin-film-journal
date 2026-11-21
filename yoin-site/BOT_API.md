@@ -37,7 +37,7 @@ TMDBで映画とドラマ・アニメ（TV）を日本語で検索し、人気�
 ```json
 {"tmdbId":129,"mediaType":"movie","status":"watched","rating":4.5,"date":"2026-11-20","review":"感想","meta":"メモ"}
 ```
-- `status` は必須（`watched` / `want`）。`rating` は 0〜5（小数第1位まで、0＝未評価、省略時0）。`date` は `YYYY-MM-DD` か空。
+- `status` は必須（`watched` / `want`）。`rating` は 0〜5（小数第1位まで、0＝未評価、省略時0）。`date` は `YYYY-MM-DD`・`YYYY-MM`（月まで）・`YYYY`（年だけ）か空。
 - `tmdbId` があればサーバー側でTMDBの作品情報と日本の配信先を取得し、画面から登録したときと同じ形の `movie` を付けます。`title` 省略時は日本語タイトル。`mediaType` 省略時は `movie`。
 - 同じ `tmdbId`＋`mediaType` がすでに棚にあれば `409`（`record` に既存の記録）。
 - `tmdbId` なしで作品名だけの場合、同じ作品名の記録があれば `409`。別作品として追加するなら `"allowDuplicateTitle": true`。
@@ -51,6 +51,15 @@ TMDBで映画とドラマ・アニメ（TV）を日本語で検索し、人気�
 - `viewings` を送ると配列全体を置き換え、`date` / `method` / `service` は最新の鑑賞に合わせて自動で更新されます（再鑑賞を1件足すだけなら下の `POST .../viewings` が簡単です）。
 - `_revision` 必須。最新でなければ `409`（`record` に最新の記録）。
 - 成功時 `{"record": {...,"_revision":2}}`
+
+### `POST /api/bot/records/:id/link`（作品情報を紐づける）
+「確認が必要」などの記録を TMDB の作品に紐づけます。
+```json
+{"_revision":1,"tmdbId":760104,"mediaType":"movie","reason":"作品名と製作年が完全一致"}
+```
+- 変わるのは `movie`（サーバー側でTMDBから取得）と `enrichment`（`status:"linked"`、前の状態は `enrichment.previous`）だけ。作品名・評価・感想・日付などはそのまま。
+- 紐づけ前の記録は `enrichment_snapshots` に残します（すでにあれば上書きしません）。
+- 同じ作品が別の記録に紐づいていれば `409`（`record` にその記録）、`_revision` が違えば `409`、TMDBにない作品は `404`。
 
 ### 追加項目（すべて省略可。既存の記録にはありません）
 | 項目 | 内容 |
@@ -87,8 +96,14 @@ TMDBで映画とドラマ・アニメ（TV）を日本語で検索し、人気�
 
 同じお知らせは二重に作りません。記録そのものは書き換えません。
 
-- `GET /api/bot/notices?unread=1&limit=50` → `{"unread": 未読数, "progress":{"watching","checked","lastChecked"}, "notices":[{"id","kind","recordId","title","tmdbId","mediaType","poster","provider"?,"date"?,"message","created","read"}]}`（新しい順、`limit` 最大200）
+- `GET /api/bot/notices?unread=1&since=<ミリ秒>&limit=50` → `{"now": サーバー時刻, "unread": 未読数, "progress":{"watching","checked","lastChecked"}, "notices":[{"id","kind","kindLabel","recordId","title","tmdbId","mediaType","poster","provider"?,"monetization"?,"date"?,"message","created","read","tmdbUrl","watchUrl","appUrl"}]}`（新しい順、`limit` 最大200）
+  - `since` を付けると `created` がそれより新しいものだけ。前回の返り値の `now` を次の `since` に使えば差分だけ取れます。
+  - `kindLabel` は日本語の種類名（配信開始／レンタル・購入開始／もうすぐ公開／公開日）、`watchUrl` はTMDBの日本の視聴先ページ、`appUrl` は余韻のURL。
 - `POST /api/bot/notices/read` `{"ids":["..."]}` または `{"all":true}` → `{"marked": 件数}`
+
+## 削除・ゴミ箱・バックアップについて
+- 画面からの削除（記録・リスト）はゴミ箱に移り、30日間は画面の「ゴミ箱」から元に戻せます。30日を過ぎるとCronで自動的に完全削除されます。ボットからは今までどおり削除できず、ゴミ箱も触れません。
+- 全データ（記録・リスト・お知らせ・配信確認・ゴミ箱・紐づけ前の記録）を週1回、D1の `backups` / `backup_chunks` テーブルに自動バックアップし、新しい8回分を残します。画面のフッター「自動バックアップ」からダウンロードできます（ボットからは読めません）。
 
 ## エラー
 `{"error": "日本語のメッセージ"}`。TMDB未接続・接続不可は `503`、TMDB側の失敗は `502`、混雑は `429`、TMDBに作品がない場合は `404`。

@@ -13,6 +13,7 @@ export async function api(request, env) {
   try {
     if(url.pathname==='/api/enrich')return await enrichBatch(request,env);
     if(/^\/api\/(lists|notices)(\/|$)/.test(url.pathname))return await featureApi(request,env,url);
+    if(/^\/api\/(trash|backups)(\/|$)/.test(url.pathname))return await safetyApi(request,env,url);
     if(url.pathname==='/api/records' && request.method==='GET') {
       const {results}=await env.DB.prepare('SELECT body, revision FROM films ORDER BY id').all();
       return json({records:results.map(r=>({...JSON.parse(r.body),_revision:r.revision}))});
@@ -35,7 +36,8 @@ export async function api(request, env) {
         if(!validate(data)||data.id!==id)return json({error:'記録の形式が正しくありません。'},400);
         result=await env.DB.prepare('UPDATE films SET body = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(JSON.stringify(clean(data)),id,data._revision).run();
       }else if(request.method==='DELETE') {
-        result=await env.DB.prepare('DELETE FROM films WHERE id = ? AND revision = ?').bind(id,data._revision).run();
+        // Soft delete: the record moves to ゴミ箱 (trash) for 30 days.
+        result={meta:{changes:await softDelete(env,'record',id,data._revision)?1:0}};
       }else return json({error:'この操作は利用できません。'},405);
       if(result.meta.changes!==1)return json({error:'別の端末で更新されています。この画面を開き直してから編集してください。入力中の感想はコピーして残せます。'},409);
       return json({saved:true});

@@ -66,7 +66,7 @@ $('lists-view').onclick = async event => {
   if (!list) return;
   if (b.dataset.listAdd) { $('list-add-query').value = ''; renderListAdd(); $('list-add').showModal(); }
   if (b.dataset.listEdit) openListEdit(list);
-  if (b.dataset.listDelete && confirm(`リスト「${list.name}」を削除しますか？（作品の記録は消えません）`)) {
+  if (b.dataset.listDelete && confirm(`リスト「${list.name}」をゴミ箱に移動しますか？（作品の記録は消えません・30日以内なら元に戻せます）`)) {
     try { await api('lists/' + encodeURIComponent(list.id), { method: 'DELETE', body: JSON.stringify({ _revision: list._revision }) }); currentListId = null; await loadLists(); } catch (error) { alert(error.message); }
   }
   if (b.dataset.move) {
@@ -152,11 +152,12 @@ function renderStats() {
   if ($('stats-view').hidden) return;
   const watched = records.filter(r => r.status === 'watched'), rated = watched.filter(r => r.rating > 0);
   const views = watched.flatMap(r => viewingsOf(r).map(v => ({ ...v, record: r })));
-  const dated = views.filter(v => /^\d{4}-\d{2}/.test(v.date));
+  const dated = views.filter(v => /^\d{4}/.test(v.date || '')), monthly = dated.filter(v => /^\d{4}-\d{2}/.test(v.date));
   const years = [...new Set(dated.map(v => v.date.slice(0, 4)))].sort();
   if (!years.includes(statsYear)) statsYear = years.at(-1) || null;
   const byYear = years.map(y => [y, dated.filter(v => v.date.startsWith(y)).length]);
-  const months = Array.from({ length: 12 }, (_, i) => [`${i + 1}月`, dated.filter(v => v.date.startsWith(`${statsYear}-${String(i + 1).padStart(2, '0')}`)).length]);
+  const months = Array.from({ length: 12 }, (_, i) => [`${i + 1}月`, monthly.filter(v => v.date.startsWith(`${statsYear}-${String(i + 1).padStart(2, '0')}`)).length]);
+  const yearOnly = dated.filter(v => v.date.length === 4 && v.date === statsYear).length;
   const buckets = Array.from({ length: 10 }, (_, i) => [(i / 2).toFixed(1), 0]);
   for (const r of rated) buckets[Math.min(9, Math.floor(r.rating * 2 + 0.000001))][1]++;
   const tally = (list, keyFn) => { const m = new Map(); for (const r of list) for (const k of keyFn(r)) { const e = m.get(k) || { n: 0, sum: 0, rated: 0, movie: r.movie }; e.n++; if (r.rating > 0) { e.sum += r.rating; e.rated++; } m.set(k, e); } return [...m.entries()].sort((a, b) => b[1].n - a[1].n || (b[1].sum / (b[1].rated || 1)) - (a[1].sum / (a[1].rated || 1))).slice(0, 10); };
@@ -169,8 +170,8 @@ function renderStats() {
   const rewatched = watched.filter(r => viewingsOf(r).length > 1).length;
   const thisYear = tokyoToday().slice(0, 4);
   $('stats-content').innerHTML = `<div class="stats stat-cards"><span><b>${watched.length}</b>鑑賞作品</span><span><b>${views.length}</b>総鑑賞回数</span><span><b>${rated.length ? (rated.reduce((s, r) => s + r.rating, 0) / rated.length).toFixed(2) : '—'}</b>平均★</span><span><b>${dated.filter(v => v.date.startsWith(thisYear)).length}</b>${thisYear}年の鑑賞</span><span><b>${rewatched}</b>再鑑賞した作品</span><span><b>${records.length - watched.length}</b>観たい</span></div>
-  <section class="stat-block"><h3>年別の鑑賞回数</h3>${byYear.length ? vchart(byYear.slice(-15)) : ''}<p class="lookup-note">${dated.length ? `鑑賞日が入っている ${dated.length}回を集計しています。` : 'まだ鑑賞日が入っている記録がありません。'}${views.length - dated.length ? `鑑賞日なし ${views.length - dated.length}回（記録の編集・再鑑賞で鑑賞日を入れると年別・月別に反映されます）。` : ''}</p></section>
-  ${statsYear ? `<section class="stat-block"><h3>月別の鑑賞回数 <select id="stats-year" aria-label="年">${years.map(y => `<option ${y === statsYear ? 'selected' : ''}>${y}</option>`).join('')}</select></h3>${vchart(months)}</section>` : ''}
+  <section class="stat-block"><h3>年別の鑑賞回数</h3>${byYear.length ? vchart(byYear.slice(-15)) : ''}<p class="lookup-note">${dated.length ? `鑑賞日が入っている ${dated.length}回を集計しています。` : 'まだ鑑賞日が入っている記録がありません。'}${views.length - dated.length ? `鑑賞日なし ${views.length - dated.length}回（私の作品棚の「観た日が未入力」から年・月だけでも入れられます）。` : ''}</p></section>
+  ${statsYear ? `<section class="stat-block"><h3>月別の鑑賞回数 <select id="stats-year" aria-label="年">${years.map(y => `<option ${y === statsYear ? 'selected' : ''}>${y}</option>`).join('')}</select></h3>${vchart(months)}${yearOnly ? `<p class="lookup-note">${statsYear}年のうち、月が未入力の ${yearOnly}回は月別に含みません。</p>` : ''}</section>` : ''}
   <section class="stat-block"><h3>★の分布 <small class="muted">評価済み ${rated.length}作品・未評価 ${watched.length - rated.length}作品</small></h3>${vchart(buckets.map(([l, n]) => [l, n]))}<p class="lookup-note">各棒は ★の値以上〜0.5未満（4.5は5.0を含む）。</p></section>
   <section class="stat-block"><h3>鑑賞方法</h3>${methodCounts.length ? hchart(methodCounts) : ''}<p class="lookup-note">${unsetMethods ? `鑑賞方法が未設定 ${unsetMethods}回。` : ''}記録の編集画面や再鑑賞で「劇場・配信・TV・DVD/BD」を選べます。</p></section>
   <div class="stat-two"><section class="stat-block"><h3>よく観るジャンル</h3>${hchart(genres, e => avg(e[3]))}</section><section class="stat-block"><h3>よく観る監督・制作</h3>${hchart(directors, e => avg(e[3]))}<p class="lookup-note">名前をタップすると作品一覧を開きます。</p></section></div>

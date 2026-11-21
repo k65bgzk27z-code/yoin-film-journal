@@ -30,7 +30,7 @@ function botClientValid(r) {
 function botFieldError(data) {
   if ('status' in data && !['watched', 'want'].includes(data.status)) return 'status は "watched" か "want" を指定してください。';
   if ('rating' in data && (typeof data.rating !== 'number' || !Number.isFinite(data.rating) || data.rating < 0 || data.rating > 5 || Math.abs(data.rating * 10 - Math.round(data.rating * 10)) > 0.000001)) return 'rating は 0〜5 の数値（小数第1位まで、0 は未評価）で指定してください。';
-  if ('date' in data && (typeof data.date !== 'string' || (data.date !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(data.date)))) return 'date は "YYYY-MM-DD" か空文字で指定してください。';
+  if ('date' in data && (typeof data.date !== 'string' || (data.date !== '' && !PARTIAL_DATE.test(data.date)))) return 'date は "YYYY-MM-DD"・"YYYY-MM"（月まで）・"YYYY"（年だけ）か空文字で指定してください。';
   for (const k of ['review', 'meta']) if (k in data && (typeof data[k] !== 'string' || data[k].length > 100000)) return k + ' は文字列で指定してください。';
   return extrasError(data);
 }
@@ -293,7 +293,39 @@ async function botFeatureRoute(request, env, url, path, method) {
     }
     return no();
   }
-  if (path === '/api/bot/notices') return method === 'GET' ? botJson(await noticesList(env, {unreadOnly: url.searchParams.get('unread') === '1', limit: url.searchParams.get('limit') || 50})) : no();
+  if (path === '/api/bot/notices') return method === 'GET' ? botJson(await noticesList(env, {unreadOnly: url.searchParams.get('unread') === '1', limit: url.searchParams.get('limit') || 50, since: url.searchParams.get('since') || 0, origin: url.origin})) : no();
+  m = /^\/api\/bot\/records\/([^/]+)\/link$/.exec(path);
+  if (m) {
+    let id; try { id = decodeURIComponent(m[1]); } catch { return botJson({error: 'IDが不正です。'}, 400); }
+    return method === 'POST' ? botLink(request, env, id) : no();
+  }
   if (path === '/api/bot/notices/read') return method === 'POST' ? send(await noticesMarkRead(env, await body())) : no();
   return null;
+}
+
+// Link an existing record (e.g. 「確認が必要」) to a TMDB work. Only movie + enrichment change;
+// title, rating, review, dates etc. are kept. The pre-link body is kept in enrichment_snapshots.
+async function botLink(request, env, id) {
+  const data = await request.json().catch(() => null);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return botJson({error: 'JSON の本文が必要です。'}, 400);
+  if (!Number.isInteger(data._revision) || data._revision < 1) return botJson({error: '_revision を指定してください。'}, 409);
+  if (!Number.isInteger(data.tmdbId) || data.tmdbId < 1) return botJson({error: 'tmdbId が不正です。'}, 400);
+  const media = data.mediaType == null ? 'movie' : data.mediaType;
+  if (!['movie', 'tv'].includes(media)) return botJson({error: 'mediaType は movie か tv です。'}, 400);
+  const row = await env.DB.prepare('SELECT body, revision FROM films WHERE id = ?').bind(id).first();
+  if (!row) return botJson({error: '記録が見つかりません。'}, 404);
+  const current = JSON.parse(row.body);
+  if (row.revision !== data._revision) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。', record: {...current, _revision: row.revision}}, 409);
+  const other = (await botShelf(env)).find(r => r.id !== id && r.movie?.id === data.tmdbId && botMedia(r) === media);
+  if (other) return botJson({error: 'この作品は別の記録に紐づいています。', record: other}, 409);
+  const movie = await botDetails(env, await botKey(env), data.tmdbId, media);
+  const reason = typeof data.reason === 'string' && data.reason.trim() ? data.reason.trim().slice(0, 200) : 'ボットで確認して紐づけ';
+  const next = {...current, movie, enrichment: {status: 'linked', reason, checkedAt: Date.now(), candidates: [], ...(current.enrichment ? {previous: {status: current.enrichment.status, reason: current.enrichment.reason}} : {})}};
+  if (!botClientValid(next)) return botJson({error: '記録の形式が正しくありません。'}, 400);
+  const saved = await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO enrichment_snapshots (id, body, revision) VALUES (?, ?, ?)').bind(id, row.body, row.revision),
+    env.DB.prepare('UPDATE films SET body = ?, revision = revision + 1 WHERE id = ? AND revision = ?').bind(JSON.stringify(next), id, data._revision)
+  ]);
+  if (saved[1].meta.changes !== 1) return botJson({error: '別の端末で更新されています。最新の記録を取得し直してください。'}, 409);
+  return botJson({record: {...next, _revision: data._revision + 1}});
 }
